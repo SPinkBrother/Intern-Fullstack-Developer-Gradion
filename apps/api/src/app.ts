@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { cookieOptions, hashPassword, newSessionToken, SESSION_COOKIE, sessionExpiry, tokenHash, verifyPassword } from "./auth.js";
 import { JsonStore } from "./store.js";
-import { publicUser, type UserRecord } from "./types.js";
+import { publicUser, type ProjectRecord, type UserRecord } from "./types.js";
 
 declare global { namespace Express { interface Request { currentUser?: UserRecord; sessionHash?: string } } }
 
@@ -16,10 +16,14 @@ const email = z.string().trim().email().transform((value) => value.toLowerCase()
 const password = z.string().min(1).max(128);
 const loginSchema = z.object({ email, password }).strict();
 const registerSchema = z.object({ name: z.string().trim().min(1).max(80), email, password }).strict();
+const createProjectSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  bookContent: z.string().refine((value) => value.trim().length > 0).refine((value) => Buffer.byteLength(value, "utf8") <= 10 * 1024 * 1024),
+}).strict();
 
 export function createApp({ store }: { store: JsonStore }) {
   const app = express();
-  app.use(express.json({ limit: "20kb" }));
+  app.use(express.json({ limit: "11mb" }));
   app.use(cookieParser());
 
   const asyncRoute = (fn: (req: Request, res: Response) => Promise<unknown>) =>
@@ -84,6 +88,33 @@ export function createApp({ store }: { store: JsonStore }) {
       .filter((project) => project.userId === req.currentUser!.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     res.json({ projects });
+  }));
+
+  app.post("/api/projects", requireAuth, asyncRoute(async (req, res) => {
+    const parsed = createProjectSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", "Provide a project title and book content no larger than 10 MB.");
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const project: ProjectRecord = {
+      id,
+      userId: req.currentUser!.id,
+      title: parsed.data.title,
+      createdAt: now,
+      updatedAt: now,
+      status: "draft",
+      current_step: 1,
+      completedSteps: 0,
+    };
+    await store.saveBook(id, parsed.data.bookContent);
+    await store.mutate((data) => { data.projects.push(project); });
+    res.status(201).json({ project });
+  }));
+
+  app.get("/api/projects/:projectId", requireAuth, asyncRoute(async (req, res) => {
+    const project = (await store.read()).projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
+    if (!project) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    res.json({ project });
   }));
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

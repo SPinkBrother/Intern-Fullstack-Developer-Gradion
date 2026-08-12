@@ -20,7 +20,9 @@ export interface ProjectRecord {
   userId: string;
   title: string;
   createdAt: string;
+  updatedAt: string;
   status: "draft" | "in_progress" | "completed";
+  current_step: number;
   completedSteps: number;
 }
 

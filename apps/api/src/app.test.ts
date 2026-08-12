@@ -57,4 +57,28 @@ describe("authentication API", () => {
     expect(response.body.projects[0]).toMatchObject({ id: "p1", title: "The Wind in the Willows", completedSteps: 0 });
     await request(app).get("/api/projects").expect(401);
   });
+
+  it("creates a draft project and saves pasted book content to local storage", async () => {
+    const agent = request.agent(createApp({ store }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+
+    const response = await agent.post("/api/projects")
+      .send({ title: "  The Secret Garden  ", bookContent: "Chapter One\nThere was once a garden." })
+      .expect(201);
+
+    expect(response.body.project).toMatchObject({ title: "The Secret Garden", status: "draft", current_step: 1, completedSteps: 0 });
+    expect(await readFile(join(root, "books", `${response.body.project.id}.txt`), "utf8")).toBe("Chapter One\nThere was once a garden.");
+    expect((await store.read()).projects[0]).toMatchObject({ id: response.body.project.id, status: "draft", current_step: 1 });
+    const detail = await agent.get(`/api/projects/${response.body.project.id}`).expect(200);
+    expect(detail.body.project.title).toBe("The Secret Garden");
+  });
+
+  it("validates project creation and requires authentication", async () => {
+    const app = createApp({ store });
+    await request(app).post("/api/projects").send({ title: "Book", bookContent: "Text" }).expect(401);
+    const agent = request.agent(app);
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    await agent.post("/api/projects").send({ title: "", bookContent: "Text" }).expect(400);
+    await agent.post("/api/projects").send({ title: "Book", bookContent: "   " }).expect(400);
+  });
 });

@@ -8,7 +8,7 @@ export class JsonStore {
   private readonly file: string;
   private tail: Promise<void> = Promise.resolve();
 
-  constructor(readonly root: string) { this.file = join(root, "store.json"); }
+  constructor(readonly root: string, readonly booksRoot = join(root, "books")) { this.file = join(root, "store.json"); }
 
   async init() {
     await mkdir(this.root, { recursive: true });
@@ -35,6 +35,11 @@ export class JsonStore {
     this.tail = operation.catch(() => undefined);
     await operation;
     return result;
+  }
+
+  async saveBook(projectId: string, content: string) {
+    await mkdir(this.booksRoot, { recursive: true });
+    await writeFile(join(this.booksRoot, `${projectId}.txt`), content, { encoding: "utf8", flag: "wx" });
   }
 
   private async write(data: StoreData) {

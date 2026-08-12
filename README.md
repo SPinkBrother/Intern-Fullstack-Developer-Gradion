@@ -1,6 +1,6 @@
 # Gradion — Authentication Checkpoint
 
-This repository currently contains the first two staged checkpoints: authentication, plus the authenticated project list and empty state.
+This repository currently contains authentication, the authenticated project list, and local project creation from pasted or uploaded text.
 
 The React frontend uses Tailwind CSS with the brown pastel palette defined as reusable theme tokens in `apps/web/src/styles.css`.
 
@@ -31,10 +31,18 @@ npm.cmd run dev
 
 Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an HTTP-only, SameSite=Lax cookie and only its SHA-256 hash is stored in `data/store.json`.
 
+## Project API and storage
+
+- `GET /api/projects` lists projects owned by the signed-in user.
+- `POST /api/projects` creates a draft project from `{ "title", "bookContent" }`.
+- `GET /api/projects/:projectId` loads an owned project.
+
+Project metadata remains in `data/store.json`. Book text is stored locally at `storage/books/{project_id}.txt` and is not sent to Gemini during project creation.
+
 ## Test
 
 ```sh
 ./test.sh
 ```
 
-The New project buttons route to a clearly labeled next-checkpoint placeholder. Book upload, project creation, Gemini, and illustration features are not implemented yet.
+Gemini and illustration pipeline features are not implemented yet.

@@ -1,6 +1,6 @@
 export interface User { id: string; name: string; email: string }
 export interface AuthPayload { user: User }
-export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed"; completedSteps: number }
+export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed"; current_step: number; completedSteps: number }
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -20,4 +20,6 @@ export const api = {
   register: (name: string, email: string, password: string) => call<AuthPayload>("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, password }) }),
   logout: () => call<void>("/api/auth", { method: "DELETE" }),
   projects: () => call<{ projects: Project[] }>("/api/projects"),
+  project: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}`),
+  createProject: (title: string, bookContent: string) => call<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify({ title, bookContent }) }),
 };
