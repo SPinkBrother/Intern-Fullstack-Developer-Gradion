@@ -15,9 +15,19 @@ export interface SessionRecord {
   expiresAt: string;
 }
 
+export interface ProjectRecord {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  status: "draft" | "in_progress" | "completed";
+  completedSteps: number;
+}
+
 export interface StoreData {
   users: UserRecord[];
   sessions: SessionRecord[];
+  projects: ProjectRecord[];
 }
 
 export function publicUser(user: UserRecord) {

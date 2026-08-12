@@ -79,6 +79,13 @@ export function createApp({ store }: { store: JsonStore }) {
     res.status(204).end();
   }));
 
+  app.get("/api/projects", requireAuth, asyncRoute(async (req, res) => {
+    const projects = (await store.read()).projects
+      .filter((project) => project.userId === req.currentUser!.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    res.json({ projects });
+  }));
+
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ApiError) return res.status(error.status).json({ code: error.code, message: error.message });
     res.status(500).json({ code: "INTERNAL_ERROR", message: "The server could not complete the request." });

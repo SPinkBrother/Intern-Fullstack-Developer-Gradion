@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StoreData } from "./types.js";
 
-const EMPTY: StoreData = { users: [], sessions: [] };
+const EMPTY: StoreData = { users: [], sessions: [], projects: [] };
 
 export class JsonStore {
   private readonly file: string;
@@ -22,7 +22,7 @@ export class JsonStore {
   async read(): Promise<StoreData> {
     const parsed = JSON.parse(await readFile(this.file, "utf8"));
     if (!Array.isArray(parsed.users) || !Array.isArray(parsed.sessions)) throw new Error("Expected users and sessions arrays");
-    return { users: parsed.users, sessions: parsed.sessions };
+    return { users: parsed.users, sessions: parsed.sessions, projects: Array.isArray(parsed.projects) ? parsed.projects : [] };
   }
 
   async mutate<T>(fn: (data: StoreData) => T | Promise<T>): Promise<T> {

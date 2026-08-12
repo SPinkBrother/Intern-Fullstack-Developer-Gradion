@@ -1,18 +1,35 @@
 import { useEffect, useState } from "react";
-import { api, type User } from "./api";
+import { api, type Project, type User } from "./api";
 import { LoginPage } from "./LoginPage";
+import { NextCheckpointPage } from "./NextCheckpointPage";
+import { ProjectListPage } from "./ProjectListPage";
 import { RegisterPage } from "./RegisterPage";
 import "./styles.css";
 
-function route() { return location.hash === "#/register" ? "register" : "login"; }
+type Screen = "login" | "register" | "projects" | "new-project";
+function route(user: User | null): Screen {
+  if (!user) return location.hash === "#/register" ? "register" : "login";
+  return location.hash === "#/projects/new" ? "new-project" : "projects";
+}
 
 export default function App() {
-  const [screen, setScreen] = useState<"login" | "register">(route());
-  const [email, setEmail] = useState(""); const [user, setUser] = useState<User | null>(null); const [loading, setLoading] = useState(true);
-  useEffect(() => { const changed = () => setScreen(route()); addEventListener("hashchange", changed); return () => removeEventListener("hashchange", changed); }, []);
-  useEffect(() => { api.session().then(({ user }) => setUser(user)).catch(() => undefined).finally(() => setLoading(false)); }, []);
-  function navigate(next: "login" | "register", retainedEmail = "") { setEmail(retainedEmail); location.hash = `#/${next}`; setScreen(next); }
-  if (loading) return <main className="loading"><div className="spinner" aria-label="Restoring session"/></main>;
-  if (user) return <main className="signed-in"><section><span className="brand-mark">G</span><span className="eyebrow">Authentication checkpoint</span><h1>Welcome, {user.name}.</h1><p>Your login and cookie session are working. The next application step has intentionally not been built yet.</p><dl><div><dt>Email</dt><dd>{user.email}</dd></div><div><dt>Session</dt><dd>Active</dd></div></dl><button className="primary" onClick={async () => { await api.logout(); setUser(null); navigate("login"); }}>Sign out</button></section></main>;
-  return screen === "register" ? <RegisterPage initialEmail={email} onRegister={setUser} onLogin={(value) => navigate("login", value)} /> : <LoginPage initialEmail={email} onLogin={setUser} onRegister={(value) => navigate("register", value)} />;
+  const [screen, setScreen] = useState<Screen>("login");
+  const [email, setEmail] = useState(""); const [user, setUser] = useState<User | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]); const [projectsLoading, setProjectsLoading] = useState(false); const [projectsError, setProjectsError] = useState("");
+  const [sessionLoading, setSessionLoading] = useState(true);
+
+  useEffect(() => {
+    api.session().then(({ user }) => { setUser(user); setScreen(route(user)); loadProjects(); }).catch(() => setScreen(route(null))).finally(() => setSessionLoading(false));
+  }, []);
+  useEffect(() => { const changed = () => setScreen(route(user)); addEventListener("hashchange", changed); return () => removeEventListener("hashchange", changed); }, [user]);
+
+  async function loadProjects() { setProjectsLoading(true); setProjectsError(""); try { setProjects((await api.projects()).projects); } catch (value) { setProjectsError((value as Error).message); } finally { setProjectsLoading(false); } }
+  function authenticated(nextUser: User) { setUser(nextUser); location.hash = "#/projects"; setScreen("projects"); loadProjects(); }
+  function navigate(next: Screen, retainedEmail = "") { setEmail(retainedEmail); const hashes: Record<Screen,string> = { login: "#/login", register: "#/register", projects: "#/projects", "new-project": "#/projects/new" }; location.hash = hashes[next]; setScreen(next); }
+  async function signOut() { await api.logout(); setUser(null); setProjects([]); navigate("login"); }
+
+  if (sessionLoading) return <main className="loading"><div className="spinner" aria-label="Restoring session"/></main>;
+  if (!user) return screen === "register" ? <RegisterPage initialEmail={email} onRegister={authenticated} onLogin={(value) => navigate("login", value)} /> : <LoginPage initialEmail={email} onLogin={authenticated} onRegister={(value) => navigate("register", value)} />;
+  if (screen === "new-project") return <NextCheckpointPage onBack={() => navigate("projects")}/>;
+  return <ProjectListPage user={user} projects={projects} loading={projectsLoading} error={projectsError} onNewProject={() => navigate("new-project")} onSignOut={signOut}/>;
 }

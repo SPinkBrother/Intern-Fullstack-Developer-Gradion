@@ -1,6 +1,6 @@
 # Gradion — Authentication Checkpoint
 
-This repository currently contains only the first implementation checkpoint: login, registration, cookie-session restoration, and sign-out.
+This repository currently contains the first two staged checkpoints: authentication, plus the authenticated project list and empty state.
 
 ## Run
 
@@ -25,6 +25,7 @@ npm.cmd run dev
 - `POST /api/auth/register` — `{ "name", "email", "password" }`
 - `GET /api/auth` — restore the current session
 - `DELETE /api/auth` — sign out
+- `GET /api/projects` — list projects owned by the signed-in user
 
 Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an HTTP-only, SameSite=Lax cookie and only its SHA-256 hash is stored in `data/store.json`.
 
@@ -34,4 +35,4 @@ Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an H
 ./test.sh
 ```
 
-No project, book upload, Gemini, or illustration feature is implemented in this checkpoint.
+The New project buttons route to a clearly labeled next-checkpoint placeholder. Book upload, project creation, Gemini, and illustration features are not implemented yet.
