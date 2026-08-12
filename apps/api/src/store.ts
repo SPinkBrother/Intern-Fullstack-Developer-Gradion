@@ -14,22 +14,22 @@ export class JsonStore {
     await mkdir(this.root, { recursive: true });
     try { await this.read(); }
     catch (error: any) {
-      if (error?.code !== "ENOENT") throw new Error(`Authentication store is invalid: ${error instanceof Error ? error.message : String(error)}`);
+      if (error?.code !== "ENOENT") throw new Error(`Store is invalid: ${error instanceof Error ? error.message : String(error)}`);
       await this.write(EMPTY);
     }
   }
 
   async read(): Promise<StoreData> {
-    const parsed = JSON.parse(await readFile(this.file, "utf8"));
-    if (!Array.isArray(parsed.users) || !Array.isArray(parsed.sessions)) throw new Error("Expected users and sessions arrays");
-    return { users: parsed.users, sessions: parsed.sessions, projects: Array.isArray(parsed.projects) ? parsed.projects : [] };
+    const data = JSON.parse(await readFile(this.file, "utf8"));
+    if (!Array.isArray(data.users) || !Array.isArray(data.sessions)) throw new Error("Expected users and sessions arrays");
+    return { users: data.users, sessions: data.sessions, projects: Array.isArray(data.projects) ? data.projects : [] };
   }
 
-  async mutate<T>(fn: (data: StoreData) => T | Promise<T>): Promise<T> {
+  async mutate<T>(change: (data: StoreData) => T | Promise<T>): Promise<T> {
     let result!: T;
     const operation = this.tail.then(async () => {
       const data = await this.read();
-      result = await fn(data);
+      result = await change(data);
       await this.write(data);
     });
     this.tail = operation.catch(() => undefined);
@@ -40,6 +40,10 @@ export class JsonStore {
   async saveBook(projectId: string, content: string) {
     await mkdir(this.booksRoot, { recursive: true });
     await writeFile(join(this.booksRoot, `${projectId}.txt`), content, { encoding: "utf8", flag: "wx" });
+  }
+
+  async readBook(projectId: string) {
+    return readFile(join(this.booksRoot, `${projectId}.txt`), "utf8");
   }
 
   private async write(data: StoreData) {

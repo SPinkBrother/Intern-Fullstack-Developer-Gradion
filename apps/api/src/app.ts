@@ -20,6 +20,7 @@ const createProjectSchema = z.object({
   title: z.string().trim().min(1).max(160),
   bookContent: z.string().refine((value) => value.trim().length > 0).refine((value) => Buffer.byteLength(value, "utf8") <= 10 * 1024 * 1024),
 }).strict();
+const artStyleSchema = z.object({ artStyle: z.string().max(1000).transform((value) => value.trim()) }).strict();
 
 export function createApp({ store }: { store: JsonStore }) {
   const app = express();
@@ -103,8 +104,6 @@ export function createApp({ store }: { store: JsonStore }) {
       createdAt: now,
       updatedAt: now,
       status: "draft",
-      current_step: 1,
-      completedSteps: 0,
     };
     await store.saveBook(id, parsed.data.bookContent);
     await store.mutate((data) => { data.projects.push(project); });
@@ -114,6 +113,31 @@ export function createApp({ store }: { store: JsonStore }) {
   app.get("/api/projects/:projectId", requireAuth, asyncRoute(async (req, res) => {
     const project = (await store.read()).projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
     if (!project) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    res.json({ project });
+  }));
+
+  app.get("/api/projects/:projectId/book", requireAuth, asyncRoute(async (req, res) => {
+    const project = (await store.read()).projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
+    if (!project) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    try {
+      res.json({ bookContent: await store.readBook(project.id) });
+    } catch (error: any) {
+      if (error?.code === "ENOENT") throw new ApiError(404, "BOOK_NOT_FOUND", "The saved book could not be found.");
+      throw error;
+    }
+  }));
+
+  app.patch("/api/projects/:projectId/style", requireAuth, asyncRoute(async (req, res) => {
+    const parsed = artStyleSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", "Art style must be no longer than 1,000 characters.");
+    const project = await store.mutate((data) => {
+      const ownedProject = data.projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
+      if (!ownedProject) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+      if (parsed.data.artStyle) ownedProject.artStyle = parsed.data.artStyle;
+      else delete ownedProject.artStyle;
+      ownedProject.updatedAt = new Date().toISOString();
+      return ownedProject;
+    });
     res.json({ project });
   }));
 

@@ -9,14 +9,20 @@
 - [x] Project list and empty state
   - Authenticated, user-scoped `GET /api/projects`.
   - Loading, failure, empty, and populated list layouts based on `app-demo.html`.
-  - Title, created date, Draft/In progress/Done pill, and five-step progress display.
+  - Title, created date, and draft status.
   - `#/projects/new` navigation seam prepared for the next checkpoint.
 - [x] New project with paste/upload and local storage
   - Required project title and book content validation in the UI and API.
   - Direct text pasting and `.txt` file loading.
   - Authenticated `POST /api/projects` with locally persisted books under `storage/books`.
-  - Draft initialization at step 1 and navigation to the project detail view.
-  - A persistent five-step project workspace that advances by updating project state without changing routes between pipeline steps.
+  - Draft project creation and navigation to a simple saved-book detail view.
+- [x] Book preview
+  - Authenticated, owner-only endpoint for reading the locally saved `.txt` book.
+  - Short preview and in-page full-book dialog on the existing project detail view.
+- [x] Optional manual art style
+  - Owner-only project endpoint for saving or clearing a manual style description.
+  - Blank style is explicitly reserved for deriving the style from the book during later Gemini integration.
+  - Five-stage progress bar mirrors `app-demo.html`; saving a style immediately marks Style complete and shows Characters as next.
 
 Gemini integration and the five-step illustration pipeline are intentionally not implemented yet.
 

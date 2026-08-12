@@ -1,95 +1,141 @@
-import type { Project } from "./api";
+import { useEffect, useState } from "react";
+import { api, type Project } from "./api";
 
-const STEPS = ["Style", "Characters", "Portraits", "Chapters", "Illustrations"] as const;
+const PREVIEW_LENGTH = 320;
+const STAGES = ["Style", "Characters", "Portraits", "Chapters", "Illustrations"] as const;
 
-type Props = {
-  project: Project | null;
-  loading: boolean;
-  error: string;
-  authorName: string;
-  onBack: () => void;
-  onRunStep?: (step: number) => void;
-};
+export function ProjectDetailPage({ project, loading, error, authorName, onBack }: { project: Project | null; loading: boolean; error: string; authorName: string; onBack: () => void }) {
+  const [bookContent, setBookContent] = useState("");
+  const [bookLoading, setBookLoading] = useState(false);
+  const [bookError, setBookError] = useState("");
+  const [bookOpen, setBookOpen] = useState(false);
+  const [artStyle, setArtStyle] = useState("");
+  const [styleSaving, setStyleSaving] = useState(false);
+  const [styleMessage, setStyleMessage] = useState("");
+  const [styleError, setStyleError] = useState("");
+  const [savedArtStyle, setSavedArtStyle] = useState("");
 
-export function ProjectDetailPage({ project, loading, error, authorName, onBack, onRunStep }: Props) {
+  useEffect(() => {
+    if (!project) return;
+    let active = true;
+    setBookContent("");
+    setBookError("");
+    setBookLoading(true);
+    api.book(project.id)
+      .then(({ bookContent }) => { if (active) setBookContent(bookContent); })
+      .catch((value) => { if (active) setBookError((value as Error).message); })
+      .finally(() => { if (active) setBookLoading(false); });
+    return () => { active = false; };
+  }, [project?.id]);
+
+  useEffect(() => {
+    setArtStyle(project?.artStyle ?? "");
+    setSavedArtStyle(project?.artStyle ?? "");
+    setStyleMessage("");
+    setStyleError("");
+  }, [project?.id, project?.artStyle]);
+
+  useEffect(() => {
+    if (!bookOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setBookOpen(false); };
+    addEventListener("keydown", closeOnEscape);
+    return () => removeEventListener("keydown", closeOnEscape);
+  }, [bookOpen]);
+
+  const preview = bookContent.length > PREVIEW_LENGTH ? `${bookContent.slice(0, PREVIEW_LENGTH).trimEnd()}…` : bookContent;
+
+  async function saveArtStyle() {
+    if (!project || styleSaving) return;
+    setStyleSaving(true);
+    setStyleMessage("");
+    setStyleError("");
+    try {
+      const { project: savedProject } = await api.saveArtStyle(project.id, artStyle);
+      setArtStyle(savedProject.artStyle ?? "");
+      setSavedArtStyle(savedProject.artStyle ?? "");
+      setStyleMessage(savedProject.artStyle ? "Art style saved." : "No manual style saved. Gemini will base it on the book text later.");
+    } catch (value) {
+      setStyleError((value as Error).message);
+    } finally {
+      setStyleSaving(false);
+    }
+  }
+
   return (
-    <main className="min-h-screen bg-page bg-[radial-gradient(circle_at_12%_0,#fffaf5_0,transparent_28%)] px-4 py-8 sm:px-8 sm:py-12">
-      <section className="mx-auto w-full max-w-6xl">
-        <button className="mb-8 text-sm font-bold text-brand transition hover:-translate-x-0.5 hover:text-brand-hover motion-reduce:hover:translate-x-0" onClick={onBack}>← Back to projects</button>
-        {loading ? <div className="h-72 animate-pulse rounded-2xl bg-soft motion-reduce:animate-none" aria-label="Loading project" /> : error ? <div className="rounded-xl border border-danger/25 bg-danger/10 p-5 text-danger" role="alert">{error}</div> : project ? <Workspace project={project} authorName={authorName} onRunStep={onRunStep} /> : null}
+    <main className="min-h-screen bg-page px-4 py-10 sm:px-8 sm:py-14">
+      <section className="mx-auto w-full max-w-4xl">
+        <button className="mb-8 text-sm font-bold text-brand hover:text-brand-hover" onClick={onBack}>← Back to projects</button>
+        {loading ? <div className="h-52 animate-pulse rounded-2xl bg-soft motion-reduce:animate-none" aria-label="Loading project" /> : error ? <div className="rounded-xl border border-danger/25 bg-danger/10 p-5 text-danger" role="alert">{error}</div> : project ? (
+          <div className="rounded-2xl border border-line bg-surface p-7 shadow-card sm:p-10">
+            <span className="mb-3 inline-flex rounded-full bg-stone-200 px-3 py-1 text-xs font-bold text-muted">Draft</span>
+            <h1 className="font-display text-4xl text-ink sm:text-5xl">{project.title}</h1>
+            <p className="mt-2 text-sm text-muted">Created {formatDate(project.createdAt)} by {authorName}</p>
+            <StageProgress styleComplete={Boolean(savedArtStyle)} />
+            <div className="mt-7 rounded-xl border border-line bg-soft/35 p-5">
+              <p className="font-bold text-ink">{savedArtStyle ? "Ready for the next stage: Characters." : "Current stage: Style."}</p>
+              <p className="mt-2 text-sm leading-6 text-muted">{savedArtStyle ? "The Characters stage will be connected in the next checkpoint." : "Save a manual style below, or leave it blank for Gemini to derive from the book later."}</p>
+            </div>
+            <form className="mt-8 rounded-xl border border-line bg-surface p-5" onSubmit={(event) => { event.preventDefault(); void saveArtStyle(); }}>
+              <label className="font-display text-2xl text-ink" htmlFor="art-style">Art style</label>
+              <p className="mt-2 text-sm leading-6 text-muted" id="art-style-help">Optional. Leave this blank and the style will be based on the book text later.</p>
+              <textarea className="mt-4 min-h-28 w-full resize-y rounded-lg border border-line bg-page px-4 py-3 text-ink outline-none placeholder:text-muted/70 focus:border-brand focus:ring-2 focus:ring-brand/20" id="art-style" aria-describedby="art-style-help" maxLength={1000} placeholder="Example: Warm hand-painted watercolor with soft ink outlines" value={artStyle} onChange={(event) => { setArtStyle(event.target.value); setStyleMessage(""); setStyleError(""); }} />
+              <div className="mt-4 flex flex-wrap items-center gap-4">
+                <button className="rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={styleSaving}>{styleSaving ? "Saving…" : "Save art style"}</button>
+                {styleMessage && <p className="text-sm font-bold text-success" role="status">{styleMessage}</p>}
+                {styleError && <p className="text-sm text-danger" role="alert">{styleError}</p>}
+              </div>
+            </form>
+            <div className="mt-8 rounded-xl border border-line bg-soft/35 p-5">
+              <h2 className="font-display text-2xl text-ink">Book preview</h2>
+              {bookLoading ? <div className="mt-4 h-24 animate-pulse rounded-lg bg-line/60 motion-reduce:animate-none" aria-label="Loading book preview" /> : bookError ? <p className="mt-3 text-danger" role="alert">{bookError}</p> : (
+                <>
+                  <p className="mt-3 whitespace-pre-wrap leading-7 text-ink">{preview}</p>
+                  {bookContent.length > PREVIEW_LENGTH && <button className="mt-5 rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand" onClick={() => setBookOpen(true)}>Read full book</button>}
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
       </section>
+      {bookOpen && project && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4" role="dialog" aria-modal="true" aria-labelledby="book-dialog-title">
+          <section className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <h2 id="book-dialog-title" className="font-display text-3xl text-ink">{project.title}</h2>
+              <button className="rounded-lg border border-line px-4 py-2 text-sm font-bold text-brand hover:bg-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand" onClick={() => setBookOpen(false)}>Close book</button>
+            </div>
+            <div className="mt-5 overflow-y-auto rounded-xl bg-page p-5">
+              <p className="whitespace-pre-wrap leading-8 text-ink">{bookContent}</p>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
 
-function Workspace({ project, authorName, onRunStep }: { project: Project; authorName: string; onRunStep?: (step: number) => void }) {
-  const currentStep = Math.min(5, Math.max(1, project.current_step || 1));
-  const currentName = STEPS[currentStep - 1];
-  const isCompleted = project.status === "completed";
-
+function StageProgress({ styleComplete }: { styleComplete: boolean }) {
+  const currentIndex = styleComplete ? 1 : 0;
   return (
-    <>
-      <header>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="font-display text-4xl leading-tight text-ink sm:text-5xl">{project.title}</h1>
-            <p className="mt-2 text-sm text-muted">Created {formatDate(project.createdAt)} by {authorName}</p>
-          </div>
-          <StatusPill status={project.status} />
-        </div>
-      </header>
-
-      <nav className="mt-9 overflow-x-auto pb-3" aria-label="Illustration pipeline">
-        <ol className="flex min-w-[760px] items-center">
-          {STEPS.map((step, index) => {
-            const number = index + 1;
-            const state = isCompleted || number < currentStep ? "complete" : number === currentStep ? "current step" : "not started";
-            const complete = state === "complete";
-            const current = state === "current step";
-            return (
-              <li className="flex min-w-0 flex-1 items-center last:flex-none" key={step}>
-                <span className="flex items-center gap-2.5 whitespace-nowrap" aria-label={`${step} ${state}`}>
-                  <i className={`grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold not-italic ${complete ? "bg-success text-white" : current ? "bg-brand text-white shadow-[0_0_0_5px_rgb(138_90_68_/_0.1)]" : "bg-line text-muted"}`}>{complete ? "✓" : number}</i>
-                  <span className={`text-sm font-bold ${complete || current ? "text-ink" : "text-muted/70"}`}>{step}</span>
-                </span>
-                {index < STEPS.length - 1 && <i className={`mx-4 h-px min-w-8 flex-1 ${number < currentStep || isCompleted ? "bg-success/60" : "bg-line"}`} aria-hidden="true" />}
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
-
-      <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-2xl border border-line bg-surface p-6 shadow-soft sm:p-8">
-          {isCompleted ? (
-            <><p className="text-lg font-bold text-ink">Your illustration project is complete.</p><p className="mt-3 leading-7 text-muted">All generated work remains available in this workspace.</p></>
-          ) : (
-            <>
-              <p className="text-lg text-ink">{currentStep === 1 ? "Ready to begin:" : "Ready for the next step:"} <strong>{currentName}</strong></p>
-              <p className="mt-4 leading-7 text-muted">This page stays open throughout the pipeline. When a step finishes, the project data and status update here without navigating to another page.</p>
-              <button className="mt-6 rounded-lg bg-brand px-6 py-3 font-bold text-white shadow-soft transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={!onRunStep} onClick={() => onRunStep?.(currentStep)}>Generate {currentName} →</button>
-              {!onRunStep && <p className="mt-3 text-xs text-muted">Generation will be connected in the next pipeline checkpoint.</p>}
-            </>
-          )}
-        </section>
-
-        <aside className="rounded-2xl bg-soft/55 p-6">
-          <span className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Project state</span>
-          <dl className="mt-4 grid gap-4 text-sm">
-            <div><dt className="text-muted">Current step</dt><dd className="mt-1 font-bold text-ink">{currentStep} · {currentName}</dd></div>
-            <div><dt className="text-muted">Book content</dt><dd className="mt-1 font-bold text-ink">Stored locally</dd></div>
-            <div><dt className="text-muted">Completed</dt><dd className="mt-1 font-bold text-ink">{isCompleted ? 5 : Math.max(project.completedSteps, currentStep - 1)} of 5 steps</dd></div>
-          </dl>
-        </aside>
-      </div>
-    </>
+    <nav className="mt-9 overflow-x-auto pb-2" aria-label="Illustration stages">
+      <ol className="flex min-w-[720px] items-center">
+        {STAGES.map((stage, index) => {
+          const state = index < currentIndex ? "complete" : index === currentIndex ? "current step" : "not started";
+          const complete = state === "complete";
+          const current = state === "current step";
+          return (
+            <li className="flex min-w-0 flex-1 items-center last:flex-none" key={stage}>
+              <span className="flex items-center gap-2 whitespace-nowrap" aria-label={`${stage} ${state}`}>
+                <span className={`grid size-8 place-items-center rounded-full text-sm font-bold ${complete ? "bg-success text-white" : current ? "bg-brand text-white shadow-[0_0_0_5px_rgb(138_90_68_/_0.12)]" : "bg-line text-muted"}`}>{complete ? "✓" : index + 1}</span>
+                <span className={`text-sm font-bold ${complete || current ? "text-ink" : "text-muted/65"}`}>{stage}</span>
+              </span>
+              {index < STAGES.length - 1 && <span className={`mx-4 h-px min-w-8 flex-1 ${index < currentIndex ? "bg-success/70" : "bg-line"}`} aria-hidden="true" />}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
-}
-
-function StatusPill({ status }: { status: Project["status"] }) {
-  const label = status === "draft" ? "Draft" : status === "completed" ? "Done" : "In progress";
-  const style = status === "completed" ? "bg-[#e0e7db] text-[#526149]" : status === "in_progress" ? "bg-soft text-brand" : "bg-stone-200 text-muted";
-  return <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${style}`}>{label}</span>;
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value)); }

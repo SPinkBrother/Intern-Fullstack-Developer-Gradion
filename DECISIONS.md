@@ -13,7 +13,11 @@ The frontend uses Tailwind CSS through its Vite plugin. The brown pastel palette
 
 The browser reads an uploaded `.txt` file and sends the resulting text through the same JSON contract used for pasted content. This keeps `POST /api/projects` simple and avoids a multipart dependency. Requests are capped at 10 MB. Metadata stays in `data/store.json`, while book files use the separately configurable `BOOKS_DIR`, which defaults to `storage/books`; this preserves existing local authentication data while keeping media-like content separate.
 
-## One persistent pipeline workspace
+## Book preview
 
-All five illustration steps use the same project-detail route. Completing a step will replace the project data in React state and advance `current_step`; it will not navigate to another page. This keeps running, failed, and completed output visible in one resumable workspace and provides the UI seam needed for the later duplicate-request lock and polling behavior.
+The project detail view reads book text through an authenticated, owner-scoped API endpoint. A short excerpt is shown in the page and the complete text opens in an in-page dialog, avoiding another route or page reload. Loading the complete text is acceptable for this assignment because book uploads are already capped at 10 MB.
+
+## Optional manual art style
+
+Art style is optional project metadata. A non-empty value is treated as the user's chosen direction; clearing it leaves the project ready for the future Gemini style step to derive a style from the stored book text. Saving a style does not introduce or advance pipeline state yet.
 

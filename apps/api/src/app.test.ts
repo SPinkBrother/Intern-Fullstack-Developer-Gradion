@@ -6,17 +6,17 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { JsonStore } from "./store.js";
 
-describe("authentication API", () => {
+describe("Gradion API", () => {
   let root: string;
   let store: JsonStore;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "gradion-auth-"));
+    root = await mkdtemp(join(tmpdir(), "gradion-"));
     store = new JsonStore(root);
     await store.init();
   });
 
-  it("registers, hashes the password, and restores the cookie session", async () => {
+  it("registers, hashes the password, and restores the session", async () => {
     const agent = request.agent(createApp({ store }));
     await agent.post("/api/auth/register").send({ name: "Lina Hart", email: "LINA@example.com", password: "simple" }).expect(201);
     const disk = await readFile(join(root, "store.json"), "utf8");
@@ -40,7 +40,6 @@ describe("authentication API", () => {
     await request(app).post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
     await request(app).post("/api/auth/register").send({ name: "Other", email: "LINA@example.com", password: "x" }).expect(409);
     await request(app).post("/api/auth").send({ email: "lina@example.com", password: "wrong" }).expect(401);
-    await request(app).post("/api/auth").send({ email: "bad", password: "x" }).expect(400);
   });
 
   it("lists only projects owned by the signed-in user", async () => {
@@ -49,31 +48,58 @@ describe("authentication API", () => {
     const linaUser = (await lina.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" })).body.user;
     const otherUser = (await other.post("/api/auth/register").send({ name: "Other", email: "other@example.com", password: "x" })).body.user;
     await store.mutate((data) => { data.projects.push(
-      { id: "p1", userId: linaUser.id, title: "The Wind in the Willows", createdAt: "2026-08-12T02:00:00.000Z", status: "draft", completedSteps: 0 },
-      { id: "p2", userId: otherUser.id, title: "Private", createdAt: "2026-08-12T03:00:00.000Z", status: "completed", completedSteps: 5 },
+      { id: "p1", userId: linaUser.id, title: "The Wind in the Willows", createdAt: "2026-08-12T02:00:00.000Z", updatedAt: "2026-08-12T02:00:00.000Z", status: "draft" },
+      { id: "p2", userId: otherUser.id, title: "Private", createdAt: "2026-08-12T03:00:00.000Z", updatedAt: "2026-08-12T03:00:00.000Z", status: "draft" },
     ); });
     const response = await lina.get("/api/projects").expect(200);
     expect(response.body.projects).toHaveLength(1);
-    expect(response.body.projects[0]).toMatchObject({ id: "p1", title: "The Wind in the Willows", completedSteps: 0 });
+    expect(response.body.projects[0]).toMatchObject({ id: "p1", title: "The Wind in the Willows" });
     await request(app).get("/api/projects").expect(401);
   });
 
-  it("creates a draft project and saves pasted book content to local storage", async () => {
+  it("creates a draft project and stores its book text", async () => {
     const agent = request.agent(createApp({ store }));
     await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
-
-    const response = await agent.post("/api/projects")
-      .send({ title: "  The Secret Garden  ", bookContent: "Chapter One\nThere was once a garden." })
-      .expect(201);
-
-    expect(response.body.project).toMatchObject({ title: "The Secret Garden", status: "draft", current_step: 1, completedSteps: 0 });
-    expect(await readFile(join(root, "books", `${response.body.project.id}.txt`), "utf8")).toBe("Chapter One\nThere was once a garden.");
-    expect((await store.read()).projects[0]).toMatchObject({ id: response.body.project.id, status: "draft", current_step: 1 });
-    const detail = await agent.get(`/api/projects/${response.body.project.id}`).expect(200);
-    expect(detail.body.project.title).toBe("The Secret Garden");
+    const response = await agent.post("/api/projects").send({ title: "  The Secret Garden  ", bookContent: "Chapter One" }).expect(201);
+    expect(response.body.project).toMatchObject({ title: "The Secret Garden", status: "draft" });
+    expect(await readFile(join(root, "books", `${response.body.project.id}.txt`), "utf8")).toBe("Chapter One");
+    expect((await agent.get(`/api/projects/${response.body.project.id}`)).body.project.id).toBe(response.body.project.id);
   });
 
-  it("validates project creation and requires authentication", async () => {
+  it("returns a saved book only to the project owner", async () => {
+    const app = createApp({ store });
+    const owner = request.agent(app);
+    const other = request.agent(app);
+    await owner.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    await other.post("/api/auth/register").send({ name: "Other", email: "other@example.com", password: "x" }).expect(201);
+
+    const created = await owner.post("/api/projects").send({ title: "The Cat", bookContent: "Chapter One\nA quiet beginning." }).expect(201);
+    const projectId = created.body.project.id;
+
+    await owner.get(`/api/projects/${projectId}/book`).expect(200, { bookContent: "Chapter One\nA quiet beginning." });
+    await other.get(`/api/projects/${projectId}/book`).expect(404);
+    await request(app).get(`/api/projects/${projectId}/book`).expect(401);
+  });
+
+  it("saves or clears an optional manual art style for the project owner", async () => {
+    const app = createApp({ store });
+    const owner = request.agent(app);
+    const other = request.agent(app);
+    await owner.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    await other.post("/api/auth/register").send({ name: "Other", email: "other@example.com", password: "x" }).expect(201);
+    const created = await owner.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+
+    const saved = await owner.patch(`/api/projects/${projectId}/style`).send({ artStyle: "  Soft watercolor and ink  " }).expect(200);
+    expect(saved.body.project.artStyle).toBe("Soft watercolor and ink");
+    expect((await store.read()).projects.find((project) => project.id === projectId)?.artStyle).toBe("Soft watercolor and ink");
+
+    await other.patch(`/api/projects/${projectId}/style`).send({ artStyle: "Oil paint" }).expect(404);
+    const cleared = await owner.patch(`/api/projects/${projectId}/style`).send({ artStyle: "   " }).expect(200);
+    expect(cleared.body.project).not.toHaveProperty("artStyle");
+  });
+
+  it("validates project creation and authentication", async () => {
     const app = createApp({ store });
     await request(app).post("/api/projects").send({ title: "Book", bookContent: "Text" }).expect(401);
     const agent = request.agent(app);

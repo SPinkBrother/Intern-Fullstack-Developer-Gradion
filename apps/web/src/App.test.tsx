@@ -30,14 +30,13 @@ describe("authentication pages", () => {
     expect(await screen.findByRole("heading", { name: "No projects yet" })).toBeInTheDocument();
   });
 
-  it("renders project rows with progress and opens the New project form", async () => {
+  it("renders a saved project and opens the New project form", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: "u1", name: "Lina Hart", email: "lina@example.com" } }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: "p1", title: "The Wind in the Willows", createdAt: "2026-08-12T00:00:00.000Z", status: "in_progress", completedSteps: 2 }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: "p1", title: "The Wind in the Willows", createdAt: "2026-08-12T00:00:00.000Z", status: "draft" }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
     render(<App />);
     expect(await screen.findByText("The Wind in the Willows")).toBeInTheDocument();
-    expect(screen.getByText("In progress")).toBeInTheDocument();
-    expect(screen.getByLabelText("2 of 5 steps complete")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /new project/i }));
     expect(await screen.findByRole("heading", { name: "New project" })).toBeInTheDocument();
     expect(location.hash).toBe("#/projects/new");
@@ -47,7 +46,8 @@ describe("authentication pages", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({ user: { id: "u1", name: "Lina Hart", email: "lina@example.com" } }))
       .mockResolvedValueOnce(json({ projects: [] }))
-      .mockResolvedValueOnce(json({ project: { id: "p-new", title: "My Book", createdAt: "2026-08-12T00:00:00.000Z", status: "draft", current_step: 1, completedSteps: 0 } }, 201));
+      .mockResolvedValueOnce(json({ project: { id: "p-new", title: "My Book", createdAt: "2026-08-12T00:00:00.000Z", status: "draft" } }, 201))
+      .mockResolvedValueOnce(json({ bookContent: "Once upon a time" }));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
@@ -78,16 +78,40 @@ describe("authentication pages", () => {
     expect(screen.getByText("novel.txt")).toBeInTheDocument();
   });
 
-  it("keeps all five pipeline steps in one project workspace", () => {
-    render(<ProjectDetailPage project={{ id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "in_progress", current_step: 2, completedSteps: 1 }} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+  it("previews a project's saved book and opens the full text without navigating", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ bookContent: "Chapter One\n" + "A long story. ".repeat(40) })));
+    render(<ProjectDetailPage project={{ id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "draft" }} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "The Cat" })).toBeInTheDocument();
     expect(screen.getByText(/created .* by mira hassan/i)).toBeInTheDocument();
+    expect(await screen.findByText(/chapter one/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /read full book/i }));
+    expect(screen.getByRole("dialog", { name: "The Cat" })).toBeInTheDocument();
+    expect(location.hash).toBe("");
+    await userEvent.click(screen.getByRole("button", { name: /close book/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("saves an optional manual art style and explains the blank behavior", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: { id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "draft", artStyle: "Soft watercolor" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={{ id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "draft" }} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    expect(screen.getByLabelText("Style current step")).toBeInTheDocument();
+    expect(screen.getByLabelText("Characters not started")).toBeInTheDocument();
+    expect(screen.getByText(/leave this blank and the style will be based on the book text later/i)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Art style"), "Soft watercolor");
+    await userEvent.click(screen.getByRole("button", { name: /save art style/i }));
+
+    expect(await screen.findByText("Art style saved.")).toBeInTheDocument();
     expect(screen.getByLabelText("Style complete")).toBeInTheDocument();
     expect(screen.getByLabelText("Characters current step")).toBeInTheDocument();
-    expect(screen.getByLabelText("Illustrations not started")).toBeInTheDocument();
-    expect(screen.getByText(/ready for the next step/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /generate characters/i })).toBeDisabled();
+    expect(screen.getByText(/ready for the next stage: characters/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/style", expect.objectContaining({ method: "PATCH" }));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ artStyle: "Soft watercolor" });
   });
 });
 

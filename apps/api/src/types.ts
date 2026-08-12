@@ -21,9 +21,8 @@ export interface ProjectRecord {
   title: string;
   createdAt: string;
   updatedAt: string;
-  status: "draft" | "in_progress" | "completed";
-  current_step: number;
-  completedSteps: number;
+  status: "draft";
+  artStyle?: string;
 }
 
 export interface StoreData {
