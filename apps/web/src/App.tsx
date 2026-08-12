@@ -21,15 +21,19 @@ export default function App() {
   useEffect(() => {
     api.session().then(({ user }) => { setUser(user); setScreen(route(user)); loadProjects(); }).catch(() => setScreen(route(null))).finally(() => setSessionLoading(false));
   }, []);
-  useEffect(() => { const changed = () => setScreen(route(user)); addEventListener("hashchange", changed); return () => removeEventListener("hashchange", changed); }, [user]);
+  useEffect(() => {
+    const handleHashChange = () => setScreen(route(user));
+    addEventListener("hashchange", handleHashChange);
+    return () => removeEventListener("hashchange", handleHashChange);
+  }, [user]);
 
   async function loadProjects() { setProjectsLoading(true); setProjectsError(""); try { setProjects((await api.projects()).projects); } catch (value) { setProjectsError((value as Error).message); } finally { setProjectsLoading(false); } }
-  function authenticated(nextUser: User) { setUser(nextUser); location.hash = "#/projects"; setScreen("projects"); loadProjects(); }
+  function handleAuthenticated(nextUser: User) { setUser(nextUser); location.hash = "#/projects"; setScreen("projects"); loadProjects(); }
   function navigate(next: Screen, retainedEmail = "") { setEmail(retainedEmail); const hashes: Record<Screen,string> = { login: "#/login", register: "#/register", projects: "#/projects", "new-project": "#/projects/new" }; location.hash = hashes[next]; setScreen(next); }
-  async function signOut() { await api.logout(); setUser(null); setProjects([]); navigate("login"); }
+  async function handleSignOut() { await api.logout(); setUser(null); setProjects([]); navigate("login"); }
 
   if (sessionLoading) return <main className="grid min-h-screen place-items-center"><div className="size-8 animate-spin rounded-full border-3 border-soft border-t-brand motion-reduce:animate-none" aria-label="Restoring session"/></main>;
-  if (!user) return screen === "register" ? <RegisterPage initialEmail={email} onRegister={authenticated} onLogin={(value) => navigate("login", value)} /> : <LoginPage initialEmail={email} onLogin={authenticated} onRegister={(value) => navigate("register", value)} />;
+  if (!user) return screen === "register" ? <RegisterPage initialEmail={email} onRegister={handleAuthenticated} onLogin={(value) => navigate("login", value)} /> : <LoginPage initialEmail={email} onLogin={handleAuthenticated} onRegister={(value) => navigate("register", value)} />;
   if (screen === "new-project") return <NextCheckpointPage onBack={() => navigate("projects")}/>;
-  return <ProjectListPage user={user} projects={projects} loading={projectsLoading} error={projectsError} onNewProject={() => navigate("new-project")} onSignOut={signOut}/>;
+  return <ProjectListPage user={user} projects={projects} loading={projectsLoading} error={projectsError} onNewProject={() => navigate("new-project")} onSignOut={handleSignOut}/>;
 }

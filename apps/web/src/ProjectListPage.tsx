@@ -70,6 +70,8 @@ function EmptyState({ onNewProject }: { onNewProject: () => void }) {
 }
 
 function ProjectRows({ projects }: { projects: Project[] }) {
+  function handleProjectOpen(projectId: string) { location.hash = `#/projects/${projectId}`; }
+
   return (
     <section className="grid gap-3" aria-label="Projects">
       {projects.map((project, index) => (
@@ -77,7 +79,7 @@ function ProjectRows({ projects }: { projects: Project[] }) {
           className="group flex min-h-[86px] w-full flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-line/80 bg-surface p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-accent hover:shadow-card motion-safe:animate-row-in sm:flex-nowrap sm:gap-6 sm:px-5"
           style={{ "--delay": `${index * 45}ms`, animationDelay: `var(--delay)` } as CSSProperties}
           key={project.id}
-          onClick={() => { location.hash = `#/projects/${project.id}`; }}
+          onClick={() => handleProjectOpen(project.id)}
         >
           <span className="min-w-0 basis-[calc(100%-2.5rem)] flex-1 sm:basis-auto">
             <strong className="block truncate font-display text-lg text-ink">{project.title}</strong>
