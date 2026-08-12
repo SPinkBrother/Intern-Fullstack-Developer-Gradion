@@ -28,7 +28,7 @@ export default function App() {
   function navigate(next: Screen, retainedEmail = "") { setEmail(retainedEmail); const hashes: Record<Screen,string> = { login: "#/login", register: "#/register", projects: "#/projects", "new-project": "#/projects/new" }; location.hash = hashes[next]; setScreen(next); }
   async function signOut() { await api.logout(); setUser(null); setProjects([]); navigate("login"); }
 
-  if (sessionLoading) return <main className="loading"><div className="spinner" aria-label="Restoring session"/></main>;
+  if (sessionLoading) return <main className="grid min-h-screen place-items-center"><div className="size-8 animate-spin rounded-full border-3 border-soft border-t-brand motion-reduce:animate-none" aria-label="Restoring session"/></main>;
   if (!user) return screen === "register" ? <RegisterPage initialEmail={email} onRegister={authenticated} onLogin={(value) => navigate("login", value)} /> : <LoginPage initialEmail={email} onLogin={authenticated} onRegister={(value) => navigate("register", value)} />;
   if (screen === "new-project") return <NextCheckpointPage onBack={() => navigate("projects")}/>;
   return <ProjectListPage user={user} projects={projects} loading={projectsLoading} error={projectsError} onNewProject={() => navigate("new-project")} onSignOut={signOut}/>;

@@ -2,6 +2,8 @@
 
 This repository currently contains the first two staged checkpoints: authentication, plus the authenticated project list and empty state.
 
+The React frontend uses Tailwind CSS with the brown pastel palette defined as reusable theme tokens in `apps/web/src/styles.css`.
+
 ## Run
 
 ```sh

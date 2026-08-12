@@ -5,7 +5,7 @@
 - [x] Authentication
   - Dedicated login and registration pages.
   - Salted password hashing, persisted HTTP-only cookie sessions, restore, and sign-out.
-  - Brown pastel responsive styling and focused tests.
+  - Brown pastel responsive styling implemented with Tailwind CSS theme tokens and focused tests.
 - [x] Project list and empty state
   - Authenticated, user-scoped `GET /api/projects`.
   - Loading, failure, empty, and populated list layouts based on `app-demo.html`.
