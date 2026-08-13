@@ -21,8 +21,14 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Set `GEMINI_API_KEY` in `.env` before using **Generate style from book**. `GEMINI_TEXT_MODEL` defaults to `gemini-3.5-flash`. The key is read only by the backend and `.env` is ignored by Git.
+Set `GEMINI_API_KEY` in `.env` before using real Gemini generation. `GEMINI_TEXT_MODEL` defaults to `gemini-3.5-flash`. The key is read only by the backend and `.env` is ignored by Git.
 Portrait generation uses `GEMINI_IMAGE_MODEL=gemini-3.1-flash-image` and stores output under `PORTRAITS_DIR=storage/portraits`.
+
+### Demo mode without Gemini quota
+
+Set `GEMINI_MOCK_MODE=true` in `.env`, then restart the stack. All five user-driven stages use the normal API, local files, locks, and persisted state, while only the external Gemini responses are replaced with deterministic sample data and placeholder PNGs. The project page displays a visible Demo mode notice. Set the value back to `false` and restart to use real Gemini.
+
+See [GEMINI_GUIDE.md](GEMINI_GUIDE.md) for the complete demo-to-real setup and verification steps.
 
 ## Authentication API
 
@@ -45,6 +51,10 @@ Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an H
 - `POST /api/projects/:projectId/characters/generate` extracts no more than two adult characters.
 - `POST /api/projects/:projectId/portraits/generate` generates missing portraits sequentially.
 - `GET /api/projects/:projectId/portraits/:characterId` serves an owned portrait.
+- `POST /api/projects/:projectId/chapters/generate` creates one chapter prompt.
+- `PATCH /api/projects/:projectId/chapter` saves edits to that prompt.
+- `POST /api/projects/:id/illustrations/generate` creates the final illustration.
+- `GET /api/projects/:id/illustrations/chapter-1` serves the owned final illustration.
 
 Project metadata remains in `data/store.json`. Book text is stored locally at `storage/books/{project_id}.txt`; it is uploaded to Gemini only when the user explicitly requests style generation.
 
@@ -54,4 +64,4 @@ Project metadata remains in `data/store.json`. Book text is stored locally at `s
 ./test.sh
 ```
 
-Chapters and final illustrations are not implemented yet.
+The test suite includes a complete five-stage API run using the deterministic demo service, so it consumes no Gemini quota.

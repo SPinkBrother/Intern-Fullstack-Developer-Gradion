@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { JsonStore } from "./store.js";
 import type { GeminiService } from "./gemini.js";
+import { MockGeminiService } from "./mock-gemini.js";
 
 describe("Gradion API", () => {
   let root: string;
@@ -232,6 +233,107 @@ describe("Gradion API", () => {
     await agent.patch(`/api/projects/${projectId}/chapter`).send({ title: "", scenePrompt: "Scene" }).expect(400);
   });
 
+  it("persists the illustration attempt before Gemini and completes with the reused book URI", async () => {
+    let observedRunningState: unknown;
+    const gemini: GeminiService = {
+      uploadBook: vi.fn(), generateStyle: vi.fn(),
+      generateIllustration: vi.fn().mockImplementation(async () => {
+        observedRunningState = (await store.read()).projects[0].stepState?.illustrations;
+        return { data: new Uint8Array([137, 80, 78, 71]), mimeType: "image/png" };
+      }),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await prepareIllustrationProject(store, projectId);
+
+    const response = await agent.post(`/api/projects/${projectId}/illustrations/generate`).expect(200);
+
+    expect(observedRunningState).toMatchObject({ state: "running", attemptId: expect.any(String), lastHeartbeatAt: expect.any(String), error: null });
+    expect(gemini.uploadBook).not.toHaveBeenCalled();
+    expect(gemini.generateIllustration).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(gemini.generateIllustration!)).toHaveBeenCalledWith("https://files/book-1", expect.stringContaining("Watercolor"), expect.any(Array));
+    expect(response.body.project.status).toBe("completed");
+    expect(response.body.project.stepState.illustrations.state).toBe("completed");
+    expect(response.body.project.chapters[0].illustrationFile).toBe("chapter-1.png");
+    await agent.get(`/api/projects/${projectId}/illustrations/chapter-1`).expect(200).expect("Content-Type", /png/);
+  });
+
+  it("rejects duplicate illustration generation through the project lock", async () => {
+    let finish!: (image: { data: Uint8Array; mimeType: "image/jpeg" }) => void;
+    const pending = new Promise<{ data: Uint8Array; mimeType: "image/jpeg" }>((resolve) => { finish = resolve; });
+    const gemini: GeminiService = { uploadBook: vi.fn(), generateStyle: vi.fn(), generateIllustration: vi.fn().mockReturnValue(pending) };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await prepareIllustrationProject(store, projectId);
+    const path = `/api/projects/${projectId}/illustrations/generate`;
+
+    const firstPromise = agent.post(path).expect(200).then((response) => response);
+    await vi.waitFor(() => expect(gemini.generateIllustration).toHaveBeenCalledTimes(1));
+    const duplicate = await agent.post(path).expect(409);
+    expect(duplicate.body.code).toBe("STEP_RUNNING");
+    finish({ data: new Uint8Array([255, 216, 255]), mimeType: "image/jpeg" });
+    await firstPromise;
+  });
+
+  it("recovers an existing illustration only during POST and skips Gemini", async () => {
+    const gemini: GeminiService = { uploadBook: vi.fn(), generateStyle: vi.fn(), generateIllustration: vi.fn() };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await prepareIllustrationProject(store, projectId);
+    await mkdir(join(store.illustrationsRoot, projectId), { recursive: true });
+    await writeFile(join(store.illustrationsRoot, projectId, "chapter-1.jpg"), new Uint8Array([255, 216, 255]));
+
+    await agent.get(`/api/projects/${projectId}/illustrations/chapter-1`).expect(404);
+    expect((await store.read()).projects[0].chapters![0].illustrationFile).toBeUndefined();
+
+    const recovered = await agent.post(`/api/projects/${projectId}/illustrations/generate`).expect(200);
+    expect(recovered.body.project.chapters[0].illustrationFile).toBe("chapter-1.jpg");
+    expect(recovered.body.project.status).toBe("completed");
+    expect(gemini.generateIllustration).not.toHaveBeenCalled();
+    await agent.get(`/api/projects/${projectId}/illustrations/chapter-1`).expect(200).expect("Content-Type", /jpeg/);
+  });
+
+  it("persists illustration failures in stepState", async () => {
+    const gemini: GeminiService = {
+      uploadBook: vi.fn(), generateStyle: vi.fn(),
+      generateIllustration: vi.fn().mockRejectedValue(new Error("Out of quota.")),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await prepareIllustrationProject(store, projectId);
+
+    await agent.post(`/api/projects/${projectId}/illustrations/generate`).expect(502);
+    const project = (await store.read()).projects[0];
+    expect(project.status).toBe("failed");
+    expect(project.stepState?.illustrations).toMatchObject({ state: "failed", attemptId: expect.any(String), lastHeartbeatAt: expect.any(String), error: "Out of quota." });
+  });
+
+  it("runs all five pipeline stages end to end in demo mode", async () => {
+    const agent = request.agent(createApp({ store, gemini: new MockGeminiService() }));
+    await agent.post("/api/auth/register").send({ name: "Demo Reader", email: "demo@example.com", password: "demo" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Lantern", bookContent: "Mira found a lantern beside the river at dusk." }).expect(201);
+    const projectId = created.body.project.id;
+
+    await agent.post(`/api/projects/${projectId}/style/generate`).expect(200);
+    const characters = await agent.post(`/api/projects/${projectId}/characters/generate`).expect(200);
+    expect(characters.body.project.characters).toHaveLength(2);
+    await agent.post(`/api/projects/${projectId}/portraits/generate`).expect(200);
+    await agent.post(`/api/projects/${projectId}/chapters/generate`).expect(200);
+    const completed = await agent.post(`/api/projects/${projectId}/illustrations/generate`).expect(200);
+
+    expect(completed.body.project.status).toBe("completed");
+    expect(completed.body.project.chapters[0].illustrationFile).toBe("chapter-1.png");
+    await agent.get(`/api/projects/${projectId}/illustrations/chapter-1`).expect(200).expect("Content-Type", /png/);
+  });
+
   it("validates project creation and authentication", async () => {
     const app = createApp({ store });
     await request(app).post("/api/projects").send({ title: "Book", bookContent: "Text" }).expect(401);
@@ -241,3 +343,18 @@ describe("Gradion API", () => {
     await agent.post("/api/projects").send({ title: "Book", bookContent: "   " }).expect(400);
   });
 });
+
+async function prepareIllustrationProject(store: JsonStore, projectId: string) {
+  await store.mutate((data) => {
+    const project = data.projects.find((item) => item.id === projectId)!;
+    project.artStyle = "Watercolor";
+    project.geminiFileName = "files/book-1";
+    project.geminiFileUri = "https://files/book-1";
+    project.geminiFileExpiresAt = "2099-01-01T00:00:00.000Z";
+    project.characters = [{ id: "c1", name: "Mira", age: 34, description: "Hero", visualPrompt: "adult woman with dark curls", portraitFile: "c1.jpg" }];
+    project.chapters = [{ title: "River Light", scenePrompt: "Mira raises a lantern beside the flooded river." }];
+    project.chapterState = "completed";
+  });
+  await mkdir(join(store.portraitsRoot, projectId), { recursive: true });
+  await writeFile(join(store.portraitsRoot, projectId, "c1.jpg"), new Uint8Array([255, 216, 255]));
+}

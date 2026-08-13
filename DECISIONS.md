@@ -39,3 +39,11 @@ Gemini file processing is polled only until the original upload becomes `ACTIVE`
 
 The chapter step stores exactly one structured object containing a title and scene prompt. Gemini selects a meaningful, plot-relevant scene from the reusable book file and receives the established character summaries and art style as context. The user can edit and save this prompt before illustration generation. This adds one review action, but prevents spending an image call on a weak or inaccurate scene.
 
+## Explicit demo mode for quota-limited verification
+
+The AI suggested relying only on unit mocks when the image model reported zero quota. I wanted a reviewer-visible full-stack path, so the backend can instead select one deterministic `MockGeminiService` with `GEMINI_MOCK_MODE=true`. It exercises the same routes, ordering, locks, JSON state, and local image endpoints without branching inside those features. Cost: placeholder images do not prove the quality or live compatibility of Gemini output, so the UI labels the mode clearly and real Gemini remains the default.
+
+## Completed-project summary
+
+The final five-stage result opens as a read-only dialog on the existing project detail route instead of introducing another page and data-loading flow. This keeps the assignment small and lets the summary reuse authenticated image endpoints and already loaded project data. The trade-off is that the summary does not have its own shareable URL.
+

@@ -11,6 +11,27 @@ export interface GeminiService {
   generateCharacters?(fileUri: string, artStyle: string): Promise<Array<{ name: string; age: number; description: string; visualPrompt: string }>>;
   generatePortrait?(prompt: string): Promise<{ data: Uint8Array; mimeType: string }>;
   generateChapter?(fileUri: string, artStyle: string, characters: Array<{ name: string; description: string }>): Promise<{ title: string; scenePrompt: string }>;
+  generateIllustration?(fileUri: string, prompt: string, portraits: GeminiImageReference[]): Promise<{ data: Uint8Array; mimeType: string }>;
+}
+
+export interface GeminiImageReference {
+  data: Uint8Array;
+  mimeType: "image/jpeg" | "image/png";
+}
+
+export function buildIllustrationPrompt({ style, characters, scene }: {
+  style: { selectedStyle: string };
+  characters: Array<{ name: string; appearanceDescription: string }>;
+  scene: { title: string; context: string };
+}) {
+  const appearances = characters.map((character) => `- ${character.name}: ${character.appearanceDescription}`).join("\n");
+  return [
+    "Create one finished 16:9 storybook chapter illustration with no text or typography.",
+    `Selected art style: ${style.selectedStyle}`,
+    `Persisted character appearances:\n${appearances}`,
+    `Current scene/chapter context:\nTitle: ${scene.title}\nScene: ${scene.context}`,
+    "Keep every depicted character consistent with these written appearance descriptions. Use the supplied portraits as additional visual references, not as the only source of character identity. Follow the stored book context and do not invent unrelated characters or events.",
+  ].join("\n\n");
 }
 
 export class RestGeminiService implements GeminiService {
@@ -166,6 +187,30 @@ export class RestGeminiService implements GeminiService {
     const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
     if (!text) throw new Error("Gemini returned no chapter prompt.");
     return JSON.parse(text) as { title: string; scenePrompt: string };
+  }
+
+  async generateIllustration(fileUri: string, prompt: string, portraits: GeminiImageReference[]) {
+    this.requireKey();
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": this.apiKey },
+      body: JSON.stringify({
+        model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image",
+        input: [
+          { type: "document", uri: fileUri, mime_type: "text/plain" },
+          ...portraits.map((portrait) => ({ type: "image", mime_type: portrait.mimeType, data: Buffer.from(portrait.data).toString("base64") })),
+          { type: "text", text: prompt },
+        ],
+        response_format: { type: "image", mime_type: "image/jpeg", aspect_ratio: "16:9", image_size: "1K" },
+      }),
+    });
+    if (!response.ok) throw new Error(await geminiError(response));
+    const body = await response.json() as { output_image?: { data?: string; mime_type?: string }; steps?: Array<{ content?: Array<{ type?: string; data?: string; mime_type?: string }> }> };
+    const image = body.output_image || body.steps?.flatMap((step) => step.content || []).find((item) => item.type === "image");
+    if (!image?.data) throw new Error("Gemini returned no illustration image.");
+    const mimeType = image.mime_type;
+    if (mimeType !== "image/jpeg" && mimeType !== "image/png") throw new Error("Gemini returned an unsupported illustration format.");
+    return { data: Buffer.from(image.data, "base64"), mimeType };
   }
 }
 

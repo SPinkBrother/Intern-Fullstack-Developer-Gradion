@@ -37,6 +37,14 @@ export interface ProjectRecord {
   chapterState?: "idle" | "running" | "failed" | "completed";
   chapterError?: string;
   chapters?: ChapterRecord[];
+  stepState?: {
+    illustrations?: {
+      state: "idle" | "running" | "failed" | "completed";
+      attemptId: string;
+      lastHeartbeatAt: string;
+      error: string | null;
+    };
+  };
 }
 
 export interface CharacterRecord {
@@ -51,6 +59,7 @@ export interface CharacterRecord {
 export interface ChapterRecord {
   title: string;
   scenePrompt: string;
+  illustrationFile?: string;
 }
 
 export interface StoreData {

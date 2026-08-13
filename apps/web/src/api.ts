@@ -1,8 +1,9 @@
 export interface User { id: string; name: string; email: string }
 export interface AuthPayload { user: User }
 export interface Character { id: string; name: string; age: number; description: string; visualPrompt: string; portraitFile?: string }
-export interface Chapter { title: string; scenePrompt: string }
-export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string; characterState?: "idle" | "running" | "failed" | "completed"; characterError?: string; portraitState?: "idle" | "running" | "failed" | "completed"; portraitError?: string; characters?: Character[]; chapterState?: "idle" | "running" | "failed" | "completed"; chapterError?: string; chapters?: Chapter[] }
+export interface Chapter { title: string; scenePrompt: string; illustrationFile?: string }
+export interface IllustrationStep { state: "idle" | "running" | "failed" | "completed"; attemptId: string; lastHeartbeatAt: string; error: string | null }
+export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string; characterState?: "idle" | "running" | "failed" | "completed"; characterError?: string; portraitState?: "idle" | "running" | "failed" | "completed"; portraitError?: string; characters?: Character[]; chapterState?: "idle" | "running" | "failed" | "completed"; chapterError?: string; chapters?: Chapter[]; stepState?: { illustrations?: IllustrationStep } }
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -31,5 +32,7 @@ export const api = {
   portraitUrl: (projectId: string, characterId: string) => `/api/projects/${projectId}/portraits/${characterId}`,
   generateChapter: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/chapters/generate`, { method: "POST" }),
   saveChapter: (projectId: string, title: string, scenePrompt: string) => call<{ project: Project }>(`/api/projects/${projectId}/chapter`, { method: "PATCH", body: JSON.stringify({ title, scenePrompt }) }),
+  generateIllustration: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/illustrations/generate`, { method: "POST" }),
+  illustrationUrl: (projectId: string) => `/api/projects/${projectId}/illustrations/chapter-1`,
   createProject: (title: string, bookContent: string) => call<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify({ title, bookContent }) }),
 };

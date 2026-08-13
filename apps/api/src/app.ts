@@ -4,7 +4,8 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { cookieOptions, hashPassword, newSessionToken, SESSION_COOKIE, sessionExpiry, tokenHash, verifyPassword } from "./auth.js";
 import { JsonStore } from "./store.js";
-import { RestGeminiService, type GeminiService } from "./gemini.js";
+import { buildIllustrationPrompt, RestGeminiService, type GeminiImageReference, type GeminiService } from "./gemini.js";
+import { acquireLock } from "./lock.js";
 import { publicUser, type ProjectRecord, type UserRecord } from "./types.js";
 
 declare global { namespace Express { interface Request { currentUser?: UserRecord; sessionHash?: string } } }
@@ -364,6 +365,106 @@ export function createApp({ store, gemini = new RestGeminiService() }: { store: 
     res.json({ project });
   }));
 
+  app.post("/api/projects/:id/illustrations/generate", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.id);
+    const existing = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    if (!existing) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    if (!existing.artStyle || !existing.characters?.length || !existing.characters.every((character) => character.portraitFile) || !existing.chapters?.length) {
+      throw new ApiError(409, "CHAPTER_REQUIRED", "Complete the Chapter stage first.");
+    }
+    if (existing.chapters[0]?.illustrationFile) return res.json({ project: existing });
+    if (!gemini.generateIllustration) throw new ApiError(503, "GEMINI_NOT_CONFIGURED", "Illustration generation is unavailable.");
+    const releaseLock = acquireLock(projectId);
+    if (!releaseLock) throw new ApiError(409, "STEP_RUNNING", "Illustration generation is already running.");
+
+    const attemptId = randomUUID();
+    try {
+      await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.stepState ??= {};
+        project.stepState.illustrations = { state: "running", attemptId, lastHeartbeatAt: new Date().toISOString(), error: null };
+        project.status = "in_progress";
+      });
+
+      let current = (await store.read()).projects.find((item) => item.id === projectId)!;
+      const recoveredFile = await store.findIllustration(projectId);
+      if (recoveredFile) {
+        const recovered = await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          project.chapters!.at(0)!.illustrationFile = recoveredFile;
+          project.stepState!.illustrations = { state: "completed", attemptId, lastHeartbeatAt: new Date().toISOString(), error: null };
+          project.status = "completed";
+          project.updatedAt = new Date().toISOString();
+          return project;
+        });
+        return res.json({ project: recovered });
+      }
+
+      if (!validGeminiFile(current)) {
+        const file = await gemini.uploadBook(current.title, await store.readBook(projectId));
+        current = await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          saveGeminiFile(project, file);
+          return project;
+        });
+      }
+
+      const portraits: GeminiImageReference[] = [];
+      for (const character of current.characters!) {
+        portraits.push({
+          data: await store.readPortrait(projectId, character.portraitFile!),
+          mimeType: imageMimeType(character.portraitFile!),
+        });
+      }
+
+      for (const chapter of current.chapters!.slice(0, 1)) {
+        const prompt = buildIllustrationPrompt({
+          style: { selectedStyle: current.artStyle! },
+          characters: current.characters!.map((character) => ({ name: character.name, appearanceDescription: character.visualPrompt })),
+          scene: { title: chapter.title, context: chapter.scenePrompt },
+        });
+        await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          project.stepState!.illustrations!.lastHeartbeatAt = new Date().toISOString();
+        });
+        const image = await gemini.generateIllustration(current.geminiFileUri!, prompt, portraits);
+        const illustrationFile = await store.saveIllustration(projectId, image.data, image.mimeType);
+        current = await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          project.chapters!.at(0)!.illustrationFile = illustrationFile;
+          return project;
+        });
+      }
+
+      const completed = await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.stepState!.illustrations = { state: "completed", attemptId, lastHeartbeatAt: new Date().toISOString(), error: null };
+        project.status = "completed";
+        project.updatedAt = new Date().toISOString();
+        return project;
+      });
+      res.json({ project: completed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gemini could not generate the illustration.";
+      await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.stepState ??= {};
+        project.stepState.illustrations = { state: "failed", attemptId, lastHeartbeatAt: new Date().toISOString(), error: message };
+        project.status = "failed";
+      });
+      throw new ApiError(502, "GEMINI_ERROR", message);
+    } finally { releaseLock(); }
+  }));
+
+  app.get("/api/projects/:id/illustrations/:chapterId", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.id);
+    const chapterId = singleParam(req.params.chapterId);
+    const project = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    const illustrationFile = chapterId === "chapter-1" ? project?.chapters?.[0]?.illustrationFile : undefined;
+    if (!illustrationFile) throw new ApiError(404, "ILLUSTRATION_NOT_FOUND", "Illustration not found.");
+    res.type(illustrationFile).send(await store.readIllustration(projectId, illustrationFile));
+  }));
+
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ApiError) return res.status(error.status).json({ code: error.code, message: error.message });
     res.status(500).json({ code: "INTERNAL_ERROR", message: "The server could not complete the request." });
@@ -383,4 +484,10 @@ function validGeminiFile(project: ProjectRecord) {
 
 function saveGeminiFile(project: ProjectRecord, file: { name: string; uri: string; expirationTime?: string }) {
   project.geminiFileName = file.name; project.geminiFileUri = file.uri; project.geminiFileExpiresAt = file.expirationTime;
+}
+
+function imageMimeType(fileName: string): "image/jpeg" | "image/png" {
+  if (fileName.toLowerCase().endsWith(".jpg")) return "image/jpeg";
+  if (fileName.toLowerCase().endsWith(".png")) return "image/png";
+  throw new Error(`Unsupported image file: ${fileName}`);
 }

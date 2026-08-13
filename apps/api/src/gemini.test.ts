@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RestGeminiService } from "./gemini.js";
+import { buildIllustrationPrompt, RestGeminiService } from "./gemini.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -35,6 +35,38 @@ describe("RestGeminiService", () => {
     const service = new RestGeminiService("test-key", "gemini-3.5-flash");
 
     await expect(service.generatePortrait("Portrait prompt")).rejects.toThrow("Out of quota.");
+  });
+
+  it("builds an illustration prompt from style, persisted appearances, and scene context", () => {
+    const prompt = buildIllustrationPrompt({
+      style: { selectedStyle: "Warm watercolor" },
+      characters: [{ name: "Mira", appearanceDescription: "Adult woman with dark curls and a green coat" }],
+      scene: { title: "River Light", context: "Mira raises a lantern beside the flooded river at dusk." },
+    });
+
+    expect(prompt).toContain("Warm watercolor");
+    expect(prompt).toContain("Mira: Adult woman with dark curls and a green coat");
+    expect(prompt).toContain("River Light");
+    expect(prompt).toContain("Mira raises a lantern beside the flooded river at dusk.");
+  });
+
+  it("generates an illustration with the stored book URI and portrait references", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ output_image: { mime_type: "image/png", data: "AQID" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new RestGeminiService("test-key", "gemini-3.5-flash");
+
+    const illustration = await service.generateIllustration("https://files/book-1", "Scene prompt", [
+      { data: new Uint8Array([1, 2]), mimeType: "image/jpeg" },
+    ]);
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.input).toEqual([
+      { type: "document", uri: "https://files/book-1", mime_type: "text/plain" },
+      { type: "image", mime_type: "image/jpeg", data: "AQI=" },
+      { type: "text", text: "Scene prompt" },
+    ]);
+    expect(request.response_format.aspect_ratio).toBe("16:9");
+    expect(illustration.mimeType).toBe("image/png");
   });
 });
 

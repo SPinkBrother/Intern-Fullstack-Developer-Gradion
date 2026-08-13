@@ -38,8 +38,11 @@
   - Gemini selects one visually meaningful, plot-relevant scene using the reusable book file, established style, and character context.
   - Structured output and server validation enforce a maximum of one chapter.
   - The generated title and scene prompt remain editable and persist without leaving the project detail page.
+- [x] Completed-project summary
+  - Stage 5 completion offers an in-page, read-only summary of the style, characters and portraits, chapter scene, final illustration, and original book.
+  - The summary reuses already loaded project data and protected image endpoints without triggering Gemini or navigating away.
 
-The final chapter illustration is intentionally not implemented yet.
+The complete five-stage pipeline is implemented. Deterministic demo mode can verify it without Gemini quota.
 
 ## Later checkpoints
 
@@ -51,5 +54,5 @@ After the authentication checkpoint is approved, plan and implement one reviewab
 4. [x] Gemini text steps: style and adult characters.
 5. [x] Portrait generation and per-item progress.
 6. [x] Chapter prompt form.
-7. [ ] Consistent final illustration.
+7. [x] Consistent final illustration.
 8. [ ] Failure recovery, final documentation, and complete verification.

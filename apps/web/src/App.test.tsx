@@ -1,12 +1,17 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { ProjectDetailPage } from "./ProjectDetailPage";
+import { DemoModeNotice, ProjectDetailPage } from "./ProjectDetailPage";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); location.hash = ""; });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); location.hash = ""; });
 
 describe("authentication pages", () => {
+  it("clearly labels demo mode", () => {
+    render(<DemoModeNotice enabled />);
+    expect(screen.getByRole("status")).toHaveTextContent("Demo mode");
+    expect(screen.getByRole("status")).toHaveTextContent("no quota");
+  });
   it("opens a dedicated login page and navigates to registration", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
     render(<App />);
@@ -167,7 +172,77 @@ describe("authentication pages", () => {
     await userEvent.click(screen.getByRole("button", { name: /save chapter/i }));
     expect(await screen.findByText("Chapter prompt saved.")).toBeInTheDocument();
   });
+
+  it("generates and displays the final illustration without navigating", async () => {
+    const project = illustrationProject();
+    const completed = { ...project, status: "completed" as const, chapters: [{ ...project.chapters[0], illustrationFile: "chapter-1.png" }], stepState: { illustrations: { state: "completed" as const, attemptId: "a1", lastHeartbeatAt: "2026-08-12T01:00:00Z", error: null } } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: completed }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={project} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Generate Illustration" }));
+
+    expect(await screen.findByAltText("Final illustration for River Light")).toHaveAttribute("src", "/api/projects/p1/illustrations/chapter-1");
+    expect(screen.getByLabelText("Illustrations complete")).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "View all details" }));
+    const summary = screen.getByRole("dialog", { name: "The Cat — complete project" });
+    expect(summary).toHaveTextContent("Watercolor");
+    expect(summary).toHaveTextContent("Mira");
+    expect(summary).toHaveTextContent("River Light");
+    expect(summary).toHaveTextContent("A quiet story");
+    expect(summary).toContainElement(screen.getByAltText("Final illustration for River Light — complete project"));
+    await userEvent.click(screen.getByRole("button", { name: "Close details" }));
+    expect(screen.queryByRole("dialog", { name: "The Cat — complete project" })).not.toBeInTheDocument();
+    expect(location.hash).toBe("");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/illustrations/generate", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("polls a running illustration with read-only GET requests", async () => {
+    vi.useFakeTimers();
+    const running = { ...illustrationProject(), stepState: { illustrations: { state: "running" as const, attemptId: "a1", lastHeartbeatAt: "2026-08-12T01:00:00Z", error: null } } };
+    const completed = { ...running, status: "completed" as const, chapters: [{ ...running.chapters[0], illustrationFile: "chapter-1.jpg" }], stepState: { illustrations: { ...running.stepState.illustrations, state: "completed" as const } } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: completed }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={running} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /generating illustration/i })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); await Promise.resolve(); });
+
+    expect(screen.getByAltText("Final illustration for River Light")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock.mock.calls.some(([path, init]) => path.includes("illustrations/generate") || init?.method === "POST")).toBe(false);
+  });
+
+  it("shows a persisted illustration error and retries through the same POST endpoint", async () => {
+    const failed = { ...illustrationProject(), status: "failed" as const, stepState: { illustrations: { state: "failed" as const, attemptId: "a1", lastHeartbeatAt: "2026-08-12T01:00:00Z", error: "Out of quota." } } };
+    const running = { ...failed, status: "in_progress" as const, stepState: { illustrations: { ...failed.stepState.illustrations, state: "running" as const, error: null } } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: running }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={failed} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Out of quota.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry Illustration" }));
+
+    expect(await screen.findByRole("button", { name: /generating illustration/i })).toBeDisabled();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/illustrations/generate", expect.objectContaining({ method: "POST" }));
+  });
 });
+
+function illustrationProject() {
+  return {
+    id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "in_progress" as const, artStyle: "Watercolor",
+    characters: [{ id: "c1", name: "Mira", age: 34, description: "Hero", visualPrompt: "dark curls", portraitFile: "c1.png" }],
+    portraitState: "completed" as const, chapterState: "completed" as const,
+    chapters: [{ title: "River Light", scenePrompt: "Mira lifts a lantern beside the river." }],
+  };
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

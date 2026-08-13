@@ -8,7 +8,12 @@ export class JsonStore {
   private readonly file: string;
   private tail: Promise<void> = Promise.resolve();
 
-  constructor(readonly root: string, readonly booksRoot = join(root, "books"), readonly portraitsRoot = join(root, "portraits")) { this.file = join(root, "store.json"); }
+  constructor(
+    readonly root: string,
+    readonly booksRoot = join(root, "books"),
+    readonly portraitsRoot = join(root, "portraits"),
+    readonly illustrationsRoot = join(root, "illustrations"),
+  ) { this.file = join(root, "store.json"); }
 
   async init() {
     await mkdir(this.root, { recursive: true });
@@ -58,7 +63,7 @@ export class JsonStore {
   async savePortrait(projectId: string, characterId: string, data: Uint8Array, mimeType: string) {
     const directory = join(this.portraitsRoot, projectId);
     await mkdir(directory, { recursive: true });
-    const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/png" ? "png" : undefined;
+    const extension = imageExtension(mimeType);
     if (!extension) throw new Error(`Unsupported portrait MIME type: ${mimeType}`);
     const fileName = `${characterId}.${extension}`;
     try { await writeFile(join(directory, fileName), data, { flag: "wx" }); }
@@ -70,9 +75,37 @@ export class JsonStore {
     return readFile(join(this.portraitsRoot, projectId, fileName));
   }
 
+  async findIllustration(projectId: string) {
+    for (const extension of ["jpg", "png"] as const) {
+      const fileName = `chapter-1.${extension}`;
+      try { await access(join(this.illustrationsRoot, projectId, fileName)); return fileName; }
+      catch (error: any) { if (error?.code !== "ENOENT") throw error; }
+    }
+    return undefined;
+  }
+
+  async saveIllustration(projectId: string, data: Uint8Array, mimeType: string) {
+    const directory = join(this.illustrationsRoot, projectId);
+    await mkdir(directory, { recursive: true });
+    const extension = imageExtension(mimeType);
+    if (!extension) throw new Error(`Unsupported illustration MIME type: ${mimeType}`);
+    const fileName = `chapter-1.${extension}`;
+    try { await writeFile(join(directory, fileName), data, { flag: "wx" }); }
+    catch (error: any) { if (error?.code !== "EEXIST") throw error; }
+    return fileName;
+  }
+
+  async readIllustration(projectId: string, fileName: string) {
+    return readFile(join(this.illustrationsRoot, projectId, fileName));
+  }
+
   private async write(data: StoreData) {
     const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, "utf8");
     await rename(temporary, this.file);
   }
+}
+
+function imageExtension(mimeType: string) {
+  return mimeType === "image/jpeg" ? "jpg" : mimeType === "image/png" ? "png" : undefined;
 }
