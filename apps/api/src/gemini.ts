@@ -147,5 +147,7 @@ function delay(milliseconds: number) {
 
 async function geminiError(response: Response) {
   const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
-  return body.error?.message || `Gemini request failed with status ${response.status}.`;
+  const message = body.error?.message;
+  if (response.status === 429 || /quota exceeded|out of quota/i.test(message || "")) return "Out of quota.";
+  return message || `Gemini request failed with status ${response.status}.`;
 }

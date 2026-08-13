@@ -27,6 +27,15 @@ describe("RestGeminiService", () => {
     expect(portrait.mimeType).toBe("image/jpeg");
     expect([...portrait.data]).toEqual([1, 2, 3]);
   });
+
+  it("replaces Gemini quota details with a short user-facing error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { message: "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests. Please retry in 44 seconds." },
+    }), { status: 429, headers: { "Content-Type": "application/json" } })));
+    const service = new RestGeminiService("test-key", "gemini-3.5-flash");
+
+    await expect(service.generatePortrait("Portrait prompt")).rejects.toThrow("Out of quota.");
+  });
 });
 
 function json(body: unknown) {
