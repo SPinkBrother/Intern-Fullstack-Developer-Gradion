@@ -18,6 +18,12 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
   const [characters, setCharacters] = useState<Character[]>([]);
   const [characterGenerating, setCharacterGenerating] = useState(false);
   const [portraitGenerating, setPortraitGenerating] = useState(false);
+  const [chapterTitle, setChapterTitle] = useState("");
+  const [scenePrompt, setScenePrompt] = useState("");
+  const [chapterCreated, setChapterCreated] = useState(false);
+  const [chapterGenerating, setChapterGenerating] = useState(false);
+  const [chapterSaving, setChapterSaving] = useState(false);
+  const [chapterMessage, setChapterMessage] = useState("");
   const [pipelineError, setPipelineError] = useState("");
 
   useEffect(() => {
@@ -42,7 +48,12 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
     setCharacters(project?.characters ?? []);
     setCharacterGenerating(project?.characterState === "running");
     setPortraitGenerating(project?.portraitState === "running");
-    setPipelineError(project?.characterError || project?.portraitError || "");
+    setChapterTitle(project?.chapters?.[0]?.title ?? "");
+    setScenePrompt(project?.chapters?.[0]?.scenePrompt ?? "");
+    setChapterCreated(Boolean(project?.chapters?.length));
+    setChapterGenerating(project?.chapterState === "running");
+    setChapterMessage("");
+    setPipelineError(project?.characterError || project?.portraitError || project?.chapterError || "");
   }, [project?.id, project?.artStyle]);
 
   useEffect(() => {
@@ -120,8 +131,34 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
     finally { setPortraitGenerating(false); }
   }
 
+  async function generateChapter() {
+    if (!project || chapterGenerating) return;
+    setChapterGenerating(true); setPipelineError(""); setChapterMessage("");
+    try {
+      const generated = (await api.generateChapter(project.id)).project.chapters?.[0];
+      setChapterTitle(generated?.title ?? "");
+      setScenePrompt(generated?.scenePrompt ?? "");
+      setChapterCreated(Boolean(generated));
+    } catch (value) { setPipelineError((value as Error).message); }
+    finally { setChapterGenerating(false); }
+  }
+
+  async function saveChapter() {
+    if (!project || chapterSaving) return;
+    if (!chapterTitle.trim() || !scenePrompt.trim()) { setPipelineError("Enter a chapter title and scene prompt."); return; }
+    setChapterSaving(true); setPipelineError(""); setChapterMessage("");
+    try {
+      const saved = (await api.saveChapter(project.id, chapterTitle, scenePrompt)).project.chapters?.[0];
+      setChapterTitle(saved?.title ?? "");
+      setScenePrompt(saved?.scenePrompt ?? "");
+      setChapterMessage("Chapter prompt saved.");
+    } catch (value) { setPipelineError((value as Error).message); }
+    finally { setChapterSaving(false); }
+  }
+
   const portraitsComplete = characters.length > 0 && characters.every((character) => character.portraitFile);
-  const currentStage = portraitsComplete ? 3 : characters.length ? 2 : savedArtStyle ? 1 : 0;
+  const chapterComplete = chapterCreated;
+  const currentStage = chapterComplete ? 4 : portraitsComplete ? 3 : characters.length ? 2 : savedArtStyle ? 1 : 0;
 
   return (
     <main className="min-h-screen bg-page px-4 py-10 sm:px-8 sm:py-14">
@@ -134,10 +171,11 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
             <p className="mt-2 text-sm text-muted">Created {formatDate(project.createdAt)} by {authorName}</p>
             <StageProgress currentIndex={currentStage} />
             <div className="mt-7 rounded-xl border border-line bg-soft/35 p-5">
-              <p className="font-bold text-ink">{currentStage === 0 ? "Current stage: Style." : currentStage === 1 ? "Ready for the next stage: Characters." : currentStage === 2 ? "Ready for the next stage: Portraits." : "Ready for the next stage: Chapters."}</p>
-              <p className="mt-2 text-sm leading-6 text-muted">{currentStage === 0 ? "Save a manual style below, or leave it blank for Gemini to derive from the book." : currentStage === 1 ? "Gemini will identify no more than two main adult characters." : currentStage === 2 ? "Portraits are generated one at a time and saved locally." : "Characters and portraits are ready for the later chapter step."}</p>
+              <p className="font-bold text-ink">{currentStage === 0 ? "Current stage: Style." : currentStage === 1 ? "Ready for the next stage: Characters." : currentStage === 2 ? "Ready for the next stage: Portraits." : currentStage === 3 ? "Ready for the next stage: Chapters." : "Ready for the next stage: Illustrations."}</p>
+              <p className="mt-2 text-sm leading-6 text-muted">{currentStage === 0 ? "Save a manual style below, or leave it blank for Gemini to derive from the book." : currentStage === 1 ? "Gemini will identify no more than two main adult characters." : currentStage === 2 ? "Portraits are generated one at a time and saved locally." : currentStage === 3 ? "Gemini will choose one meaningful scene from the book for illustration." : "Review the chapter prompt below before generating its illustration."}</p>
               {currentStage === 1 && <button className="mt-4 rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white disabled:opacity-60" disabled={characterGenerating} onClick={() => void generateCharacters()}>{characterGenerating ? "Generating characters…" : "Generate Characters →"}</button>}
               {currentStage === 2 && <button className="mt-4 rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white disabled:opacity-60" disabled={portraitGenerating} onClick={() => void generatePortraits()}>{portraitGenerating ? "Generating portraits…" : "Generate Portraits →"}</button>}
+              {currentStage === 3 && <button className="mt-4 rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white disabled:opacity-60" disabled={chapterGenerating} onClick={() => void generateChapter()}>{chapterGenerating ? "Finding a meaningful scene…" : "Generate Chapter →"}</button>}
               {pipelineError && <p className="mt-3 text-sm text-danger" role="alert">{pipelineError}</p>}
             </div>
             <form className="mt-8 rounded-xl border border-line bg-surface p-5" onSubmit={(event) => { event.preventDefault(); void saveArtStyle(); }}>
@@ -151,6 +189,16 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
                 {styleError && <p className="text-sm text-danger" role="alert">{styleError}</p>}
               </div>
             </form>
+            {chapterComplete && <form className="mt-8 rounded-xl border border-line bg-soft/35 p-5" onSubmit={(event) => { event.preventDefault(); void saveChapter(); }}>
+              <span className="text-xs font-bold uppercase tracking-[0.14em] text-brand">Chapter 1</span>
+              <h2 className="mt-1 font-display text-2xl text-ink">Illustration scene</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">Gemini selected one meaningful scene. You can refine it before generating the final illustration.</p>
+              <label className="mt-5 block text-sm font-bold text-ink" htmlFor="chapter-title">Chapter title</label>
+              <input className="mt-2 w-full rounded-lg border border-line bg-page px-4 py-3 text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" id="chapter-title" maxLength={160} value={chapterTitle} onChange={(event) => { setChapterTitle(event.target.value); setChapterMessage(""); }} />
+              <label className="mt-5 block text-sm font-bold text-ink" htmlFor="scene-prompt">Scene prompt</label>
+              <textarea className="mt-2 min-h-36 w-full resize-y rounded-lg border border-line bg-page px-4 py-3 text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" id="scene-prompt" maxLength={5000} value={scenePrompt} onChange={(event) => { setScenePrompt(event.target.value); setChapterMessage(""); }} />
+              <div className="mt-4 flex flex-wrap items-center gap-4"><button className="rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-hover disabled:opacity-60" type="submit" disabled={chapterSaving}>{chapterSaving ? "Saving…" : "Save chapter prompt"}</button>{chapterMessage && <p className="text-sm font-bold text-success" role="status">{chapterMessage}</p>}</div>
+            </form>}
             {characters.length > 0 && <section className="mt-8" aria-labelledby="characters-title">
               <h2 className="font-display text-2xl text-ink" id="characters-title">Characters ({characters.length})</h2>
               <div className="mt-4 grid gap-5 sm:grid-cols-2">{characters.map((character) => <article className="overflow-hidden rounded-xl border border-line bg-surface" key={character.id}>

@@ -26,12 +26,17 @@ const characterOutputSchema = z.array(z.object({
   name: z.string().trim().min(1).max(120), age: z.number().int().min(0).max(150),
   description: z.string().trim().min(1).max(2000), visualPrompt: z.string().trim().min(1).max(4000),
 }));
+const chapterSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  scenePrompt: z.string().trim().min(1).max(5000),
+}).strict();
 
 export function createApp({ store, gemini = new RestGeminiService() }: { store: JsonStore; gemini?: GeminiService }) {
   const app = express();
   const runningStyleProjects = new Set<string>();
   const runningCharacterProjects = new Set<string>();
   const runningPortraitProjects = new Set<string>();
+  const runningChapterProjects = new Set<string>();
   app.use(express.json({ limit: "11mb" }));
   app.use(cookieParser());
 
@@ -304,6 +309,59 @@ export function createApp({ store, gemini = new RestGeminiService() }: { store: 
     const character = project?.characters?.find((item) => item.id === characterId && item.portraitFile);
     if (!character?.portraitFile) throw new ApiError(404, "PORTRAIT_NOT_FOUND", "Portrait not found.");
     res.type(character.portraitFile).send(await store.readPortrait(projectId, character.portraitFile));
+  }));
+
+  app.post("/api/projects/:projectId/chapters/generate", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.projectId);
+    const existing = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    if (!existing) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    if (!existing.characters?.length || !existing.characters.every((character) => character.portraitFile)) throw new ApiError(409, "PORTRAITS_REQUIRED", "Complete the Portraits stage first.");
+    if (existing.chapters?.length) return res.json({ project: existing });
+    if (runningChapterProjects.has(projectId)) throw new ApiError(409, "STEP_RUNNING", "Chapter generation is already running.");
+    if (!gemini.generateChapter) throw new ApiError(503, "GEMINI_NOT_CONFIGURED", "Chapter generation is unavailable.");
+
+    runningChapterProjects.add(projectId);
+    await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.chapterState = "running"; delete project.chapterError; });
+    try {
+      let current = (await store.read()).projects.find((item) => item.id === projectId)!;
+      if (!validGeminiFile(current)) {
+        const file = await gemini.uploadBook(current.title, await store.readBook(projectId));
+        current = await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; saveGeminiFile(project, file); return project; });
+      }
+      const parsed = chapterSchema.safeParse(await gemini.generateChapter(current.geminiFileUri!, current.artStyle!, current.characters!));
+      if (!parsed.success) throw new Error("Gemini returned an invalid chapter prompt.");
+      const completed = await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.chapters = [parsed.data];
+        project.chapterState = "completed";
+        project.status = "in_progress";
+        project.updatedAt = new Date().toISOString();
+        delete project.chapterError;
+        return project;
+      });
+      res.json({ project: completed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gemini could not generate a chapter prompt.";
+      await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.chapterState = "failed"; project.chapterError = message; project.status = "failed"; });
+      throw new ApiError(502, "GEMINI_ERROR", message);
+    } finally { runningChapterProjects.delete(projectId); }
+  }));
+
+  app.patch("/api/projects/:projectId/chapter", requireAuth, asyncRoute(async (req, res) => {
+    const parsed = chapterSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", "Enter a chapter title and scene prompt.");
+    const project = await store.mutate((data) => {
+      const ownedProject = data.projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
+      if (!ownedProject) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+      if (!ownedProject.characters?.length || !ownedProject.characters.every((character) => character.portraitFile)) throw new ApiError(409, "PORTRAITS_REQUIRED", "Complete the Portraits stage first.");
+      ownedProject.chapters = [parsed.data];
+      ownedProject.chapterState = "completed";
+      ownedProject.status = "in_progress";
+      ownedProject.updatedAt = new Date().toISOString();
+      delete ownedProject.chapterError;
+      return ownedProject;
+    });
+    res.json({ project });
   }));
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

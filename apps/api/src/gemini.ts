@@ -10,6 +10,7 @@ export interface GeminiService {
   generateStyle(fileUri: string): Promise<string>;
   generateCharacters?(fileUri: string, artStyle: string): Promise<Array<{ name: string; age: number; description: string; visualPrompt: string }>>;
   generatePortrait?(prompt: string): Promise<{ data: Uint8Array; mimeType: string }>;
+  generateChapter?(fileUri: string, artStyle: string, characters: Array<{ name: string; description: string }>): Promise<{ title: string; scenePrompt: string }>;
 }
 
 export class RestGeminiService implements GeminiService {
@@ -138,6 +139,33 @@ export class RestGeminiService implements GeminiService {
     const mimeType = image.mime_type;
     if (mimeType !== "image/jpeg" && mimeType !== "image/png") throw new Error("Gemini returned an unsupported portrait format.");
     return { data: Buffer.from(image.data, "base64"), mimeType };
+  }
+
+  async generateChapter(fileUri: string, artStyle: string, characters: Array<{ name: string; description: string }>) {
+    this.requireKey();
+    const characterContext = characters.map((character) => `${character.name}: ${character.description}`).join("\n");
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": this.apiKey },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [
+          { file_data: { mime_type: "text/plain", file_uri: fileUri } },
+          { text: `Choose exactly one visually meaningful, plot-defining scene from this book for an illustration. Prefer a moment with emotional weight, clear action, setting, lighting, and composition. Reference only characters who are actually present. Art style: ${artStyle}. Established adult characters:\n${characterContext}` },
+        ] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: { type: "OBJECT", required: ["title", "scenePrompt"], properties: {
+            title: { type: "STRING", description: "A concise title for the selected scene." },
+            scenePrompt: { type: "STRING", description: "A concrete illustration prompt describing composition, characters, action, setting, mood, and lighting without adding events absent from the book." },
+          } },
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(await geminiError(response));
+    const body = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+    if (!text) throw new Error("Gemini returned no chapter prompt.");
+    return JSON.parse(text) as { title: string; scenePrompt: string };
   }
 }
 

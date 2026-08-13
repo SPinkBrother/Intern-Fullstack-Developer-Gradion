@@ -34,6 +34,9 @@ export interface ProjectRecord {
   portraitState?: "idle" | "running" | "failed" | "completed";
   portraitError?: string;
   characters?: CharacterRecord[];
+  chapterState?: "idle" | "running" | "failed" | "completed";
+  chapterError?: string;
+  chapters?: ChapterRecord[];
 }
 
 export interface CharacterRecord {
@@ -43,6 +46,11 @@ export interface CharacterRecord {
   description: string;
   visualPrompt: string;
   portraitFile?: string;
+}
+
+export interface ChapterRecord {
+  title: string;
+  scenePrompt: string;
 }
 
 export interface StoreData {

@@ -198,6 +198,40 @@ describe("Gradion API", () => {
     await agent.get(`/api/projects/${projectId}/portraits/c1`).expect(200).expect("Content-Type", /jpeg/);
   });
 
+  it("generates and saves one meaningful chapter prompt after portraits", async () => {
+    const gemini: GeminiService = {
+      uploadBook: vi.fn(),
+      generateStyle: vi.fn(),
+      generateChapter: vi.fn().mockResolvedValue({
+        title: "The Lantern at the River",
+        scenePrompt: "Mira and Jon discover the lantern beside the flooded river at dusk.",
+      }),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await store.mutate((data) => {
+      const project = data.projects.find((item) => item.id === projectId)!;
+      project.artStyle = "Watercolor";
+      project.geminiFileUri = "https://files/book-1";
+      project.characters = [
+        { id: "c1", name: "Mira", age: 34, description: "Hero", visualPrompt: "dark curls", portraitFile: "c1.png" },
+        { id: "c2", name: "Jon", age: 41, description: "Friend", visualPrompt: "silver glasses", portraitFile: "c2.png" },
+      ];
+      project.portraitState = "completed";
+    });
+
+    const generated = await agent.post(`/api/projects/${projectId}/chapters/generate`).expect(200);
+    expect(generated.body.project.chapters).toEqual([{ title: "The Lantern at the River", scenePrompt: "Mira and Jon discover the lantern beside the flooded river at dusk." }]);
+    expect(generated.body.project.chapterState).toBe("completed");
+    expect(gemini.generateChapter).toHaveBeenCalledTimes(1);
+
+    const saved = await agent.patch(`/api/projects/${projectId}/chapter`).send({ title: "River Light", scenePrompt: "Mira raises the lantern while Jon watches the water." }).expect(200);
+    expect(saved.body.project.chapters).toEqual([{ title: "River Light", scenePrompt: "Mira raises the lantern while Jon watches the water." }]);
+    await agent.patch(`/api/projects/${projectId}/chapter`).send({ title: "", scenePrompt: "Scene" }).expect(400);
+  });
+
   it("validates project creation and authentication", async () => {
     const app = createApp({ store });
     await request(app).post("/api/projects").send({ title: "Book", bookContent: "Text" }).expect(401);

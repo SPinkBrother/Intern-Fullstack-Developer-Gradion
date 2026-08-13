@@ -148,6 +148,25 @@ describe("authentication pages", () => {
     expect(await screen.findByAltText("Portrait of Mira")).toBeInTheDocument();
     expect(screen.getByLabelText("Chapters current step")).toBeInTheDocument();
   });
+
+  it("generates a meaningful chapter into an editable form", async () => {
+    const characters = [{ id: "c1", name: "Mira", age: 34, description: "Hero", visualPrompt: "dark curls", portraitFile: "c1.png" }];
+    const base = { id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "in_progress" as const, artStyle: "Watercolor", characters, portraitState: "completed" as const };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: { ...base, chapterState: "completed", chapters: [{ title: "River Light", scenePrompt: "Mira finds a lantern beside the river at dusk." }] } }))
+      .mockResolvedValueOnce(json({ project: { ...base, chapterState: "completed", chapters: [{ title: "River Light", scenePrompt: "Mira lifts the lantern beside the river." }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={base} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /generate chapter/i }));
+    expect(await screen.findByDisplayValue("River Light")).toBeInTheDocument();
+    expect(screen.getByLabelText("Illustrations current step")).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Scene prompt"));
+    await userEvent.type(screen.getByLabelText("Scene prompt"), "Mira lifts the lantern beside the river.");
+    await userEvent.click(screen.getByRole("button", { name: /save chapter/i }));
+    expect(await screen.findByText("Chapter prompt saved.")).toBeInTheDocument();
+  });
 });
 
 function json(body: unknown, status = 200) {

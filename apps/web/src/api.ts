@@ -1,7 +1,8 @@
 export interface User { id: string; name: string; email: string }
 export interface AuthPayload { user: User }
 export interface Character { id: string; name: string; age: number; description: string; visualPrompt: string; portraitFile?: string }
-export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string; characterState?: "idle" | "running" | "failed" | "completed"; characterError?: string; portraitState?: "idle" | "running" | "failed" | "completed"; portraitError?: string; characters?: Character[] }
+export interface Chapter { title: string; scenePrompt: string }
+export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string; characterState?: "idle" | "running" | "failed" | "completed"; characterError?: string; portraitState?: "idle" | "running" | "failed" | "completed"; portraitError?: string; characters?: Character[]; chapterState?: "idle" | "running" | "failed" | "completed"; chapterError?: string; chapters?: Chapter[] }
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -28,5 +29,7 @@ export const api = {
   generateCharacters: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/characters/generate`, { method: "POST" }),
   generatePortraits: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/portraits/generate`, { method: "POST" }),
   portraitUrl: (projectId: string, characterId: string) => `/api/projects/${projectId}/portraits/${characterId}`,
+  generateChapter: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/chapters/generate`, { method: "POST" }),
+  saveChapter: (projectId: string, title: string, scenePrompt: string) => call<{ project: Project }>(`/api/projects/${projectId}/chapter`, { method: "PATCH", body: JSON.stringify({ title, scenePrompt }) }),
   createProject: (title: string, bookContent: string) => call<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify({ title, bookContent }) }),
 };

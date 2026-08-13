@@ -34,8 +34,12 @@
   - Owner-only portrait endpoints serve local images; duplicate active requests are rejected per project and stage.
   - Style becomes immutable once characters exist so later portrait and illustration consistency is preserved.
   - Pre-flight safety waits for uploaded books to become `ACTIVE`, preserves returned JPEG/PNG formats, and recovers orphan portrait files without another Gemini call.
+- [x] Meaningful chapter prompt form
+  - Gemini selects one visually meaningful, plot-relevant scene using the reusable book file, established style, and character context.
+  - Structured output and server validation enforce a maximum of one chapter.
+  - The generated title and scene prompt remain editable and persist without leaving the project detail page.
 
-Gemini integration and the five-step illustration pipeline are intentionally not implemented yet.
+The final chapter illustration is intentionally not implemented yet.
 
 ## Later checkpoints
 
@@ -46,5 +50,6 @@ After the authentication checkpoint is approved, plan and implement one reviewab
 3. [ ] Persistent pipeline state and concurrency guard.
 4. [x] Gemini text steps: style and adult characters.
 5. [x] Portrait generation and per-item progress.
-6. [ ] Chapter prompt and consistent final illustration.
-7. [ ] Failure recovery, final documentation, and complete verification.
+6. [x] Chapter prompt form.
+7. [ ] Consistent final illustration.
+8. [ ] Failure recovery, final documentation, and complete verification.

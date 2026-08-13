@@ -35,3 +35,7 @@ Character extraction continues to use structured text output from the reusable G
 
 Gemini file processing is polled only until the original upload becomes `ACTIVE`, with a bounded timeout; this is not an automatic model-call retry. Portrait filenames follow Gemini's returned MIME type. The image is written before the atomic JSON metadata update, and retries first look for an existing `.jpg` or `.png` so a crash between those writes does not spend another image-generation call.
 
+## Chapter prompt review
+
+The chapter step stores exactly one structured object containing a title and scene prompt. Gemini selects a meaningful, plot-relevant scene from the reusable book file and receives the established character summaries and art style as context. The user can edit and save this prompt before illustration generation. This adds one review action, but prevents spending an image call on a weak or inaccurate scene.
+
