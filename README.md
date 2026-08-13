@@ -1,6 +1,6 @@
 # Gradion — Book Illustration Studio
 
-This repository currently contains authentication, user-owned projects, local book ingestion and preview, and the first Gemini Style step.
+This repository currently contains authentication, user-owned projects, local book ingestion and preview, Gemini Style and adult Character extraction, and locally stored character portraits.
 
 The React frontend uses Tailwind CSS with the brown pastel palette defined as reusable theme tokens in `apps/web/src/styles.css`.
 
@@ -22,6 +22,7 @@ npm.cmd run dev
 ```
 
 Set `GEMINI_API_KEY` in `.env` before using **Generate style from book**. `GEMINI_TEXT_MODEL` defaults to `gemini-3.5-flash`. The key is read only by the backend and `.env` is ignored by Git.
+Portrait generation uses `GEMINI_IMAGE_MODEL=gemini-3.1-flash-image` and stores output under `PORTRAITS_DIR=storage/portraits`.
 
 ## Authentication API
 
@@ -41,6 +42,9 @@ Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an H
 - `GET /api/projects/:projectId/book` reads the locally stored book for its owner.
 - `PATCH /api/projects/:projectId/style` saves or clears a manual style.
 - `POST /api/projects/:projectId/style/generate` derives a style with Gemini when no manual style exists.
+- `POST /api/projects/:projectId/characters/generate` extracts no more than two adult characters.
+- `POST /api/projects/:projectId/portraits/generate` generates missing portraits sequentially.
+- `GET /api/projects/:projectId/portraits/:characterId` serves an owned portrait.
 
 Project metadata remains in `data/store.json`. Book text is stored locally at `storage/books/{project_id}.txt`; it is uploaded to Gemini only when the user explicitly requests style generation.
 
@@ -50,4 +54,4 @@ Project metadata remains in `data/store.json`. Book text is stored locally at `s
 ./test.sh
 ```
 
-Characters, portraits, chapters, and final illustrations are not implemented yet.
+Chapters and final illustrations are not implemented yet.

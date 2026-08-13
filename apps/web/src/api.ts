@@ -1,6 +1,7 @@
 export interface User { id: string; name: string; email: string }
 export interface AuthPayload { user: User }
-export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string }
+export interface Character { id: string; name: string; age: number; description: string; visualPrompt: string; portraitFile?: string }
+export interface Project { id: string; title: string; createdAt: string; status: "draft" | "in_progress" | "completed" | "failed"; artStyle?: string; styleState?: "idle" | "running" | "failed" | "completed"; styleError?: string; characterState?: "idle" | "running" | "failed" | "completed"; characterError?: string; portraitState?: "idle" | "running" | "failed" | "completed"; portraitError?: string; characters?: Character[] }
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -24,5 +25,8 @@ export const api = {
   book: (projectId: string) => call<{ bookContent: string }>(`/api/projects/${projectId}/book`),
   saveArtStyle: (projectId: string, artStyle: string) => call<{ project: Project }>(`/api/projects/${projectId}/style`, { method: "PATCH", body: JSON.stringify({ artStyle }) }),
   generateArtStyle: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/style/generate`, { method: "POST" }),
+  generateCharacters: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/characters/generate`, { method: "POST" }),
+  generatePortraits: (projectId: string) => call<{ project: Project }>(`/api/projects/${projectId}/portraits/generate`, { method: "POST" }),
+  portraitUrl: (projectId: string, characterId: string) => `/api/projects/${projectId}/portraits/${characterId}`,
   createProject: (title: string, bookContent: string) => call<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify({ title, bookContent }) }),
 };

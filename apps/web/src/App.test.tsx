@@ -127,6 +127,27 @@ describe("authentication pages", () => {
     expect(screen.getByLabelText("Characters current step")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/style/generate", expect.objectContaining({ method: "POST" }));
   });
+
+  it("generates adult characters before portraits and advances to Chapters", async () => {
+    const base = { id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "in_progress" as const, artStyle: "Watercolor" };
+    const characters = [
+      { id: "c1", name: "Mira", age: 34, description: "The protagonist", visualPrompt: "dark curls" },
+      { id: "c2", name: "Jon", age: 41, description: "Her companion", visualPrompt: "silver glasses" },
+    ];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: { ...base, characters, characterState: "completed" } }))
+      .mockResolvedValueOnce(json({ project: { ...base, characters: characters.map((character) => ({ ...character, portraitFile: `${character.id}.png` })), portraitState: "completed" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={base} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /generate characters/i }));
+    expect(await screen.findByRole("heading", { name: "Characters (2)" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Portraits current step")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /generate portraits/i }));
+    expect(await screen.findByAltText("Portrait of Mira")).toBeInTheDocument();
+    expect(screen.getByLabelText("Chapters current step")).toBeInTheDocument();
+  });
 });
 
 function json(body: unknown, status = 200) {

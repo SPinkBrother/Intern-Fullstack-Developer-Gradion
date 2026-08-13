@@ -28,6 +28,12 @@
   - Blank manual style can upload the local book once and generate a persisted visual style.
   - Saved Gemini file references are reusable by later steps while valid.
   - Persisted style execution state plus a per-project in-memory guard blocks duplicate active requests; GET and polling remain read-only.
+- [x] Adult characters and portraits
+  - Gemini structured output is validated server-side, filters out minors, and stores no more than two main adult characters.
+  - Portraits use `gemini-3.1-flash-image` through Interactions, generate sequentially, and persist under `storage/portraits`.
+  - Owner-only portrait endpoints serve local images; duplicate active requests are rejected per project and stage.
+  - Style becomes immutable once characters exist so later portrait and illustration consistency is preserved.
+  - Pre-flight safety waits for uploaded books to become `ACTIVE`, preserves returned JPEG/PNG formats, and recovers orphan portrait files without another Gemini call.
 
 Gemini integration and the five-step illustration pipeline are intentionally not implemented yet.
 
@@ -38,7 +44,7 @@ After the authentication checkpoint is approved, plan and implement one reviewab
 1. [x] Project list and empty state.
 2. [x] New project with paste/upload and local storage.
 3. [ ] Persistent pipeline state and concurrency guard.
-4. [ ] Gemini text steps: style complete; adult characters remaining.
-5. [ ] Portrait generation and per-item progress.
+4. [x] Gemini text steps: style and adult characters.
+5. [x] Portrait generation and per-item progress.
 6. [ ] Chapter prompt and consistent final illustration.
 7. [ ] Failure recovery, final documentation, and complete verification.

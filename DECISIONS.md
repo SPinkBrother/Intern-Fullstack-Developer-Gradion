@@ -29,3 +29,9 @@ The Style call uses a small per-project in-memory guard and persisted `styleStat
 
 The text model default is `gemini-3.5-flash`. The existing `generateContent` REST endpoint remains appropriate for this one-shot Style operation and is supported by Gemini 3.5 Flash; a broader migration to the Interactions API can be considered when implementing the later multi-step pipeline.
 
+## Character portraits
+
+Character extraction continues to use structured text output from the reusable Gemini book file. The server filters for adults and caps the stored list at two even if the model returns more. Portraits use the recommended `gemini-3.1-flash-image` model through the Interactions API because Imagen is deprecated. Images are generated sequentially and stored on local disk, and the selected style is locked once characters exist to maintain visual consistency.
+
+Gemini file processing is polled only until the original upload becomes `ACTIVE`, with a bounded timeout; this is not an automatic model-call retry. Portrait filenames follow Gemini's returned MIME type. The image is written before the atomic JSON metadata update, and retries first look for an existing `.jpg` or `.png` so a crash between those writes does not spend another image-generation call.
+

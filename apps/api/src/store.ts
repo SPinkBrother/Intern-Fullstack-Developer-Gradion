@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StoreData } from "./types.js";
 
@@ -8,7 +8,7 @@ export class JsonStore {
   private readonly file: string;
   private tail: Promise<void> = Promise.resolve();
 
-  constructor(readonly root: string, readonly booksRoot = join(root, "books")) { this.file = join(root, "store.json"); }
+  constructor(readonly root: string, readonly booksRoot = join(root, "books"), readonly portraitsRoot = join(root, "portraits")) { this.file = join(root, "store.json"); }
 
   async init() {
     await mkdir(this.root, { recursive: true });
@@ -44,6 +44,30 @@ export class JsonStore {
 
   async readBook(projectId: string) {
     return readFile(join(this.booksRoot, `${projectId}.txt`), "utf8");
+  }
+
+  async findPortrait(projectId: string, characterId: string) {
+    for (const extension of ["jpg", "png"] as const) {
+      const fileName = `${characterId}.${extension}`;
+      try { await access(join(this.portraitsRoot, projectId, fileName)); return fileName; }
+      catch (error: any) { if (error?.code !== "ENOENT") throw error; }
+    }
+    return undefined;
+  }
+
+  async savePortrait(projectId: string, characterId: string, data: Uint8Array, mimeType: string) {
+    const directory = join(this.portraitsRoot, projectId);
+    await mkdir(directory, { recursive: true });
+    const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/png" ? "png" : undefined;
+    if (!extension) throw new Error(`Unsupported portrait MIME type: ${mimeType}`);
+    const fileName = `${characterId}.${extension}`;
+    try { await writeFile(join(directory, fileName), data, { flag: "wx" }); }
+    catch (error: any) { if (error?.code !== "EEXIST") throw error; }
+    return fileName;
+  }
+
+  async readPortrait(projectId: string, fileName: string) {
+    return readFile(join(this.portraitsRoot, projectId, fileName));
   }
 
   private async write(data: StoreData) {

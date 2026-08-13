@@ -22,10 +22,16 @@ const createProjectSchema = z.object({
   bookContent: z.string().refine((value) => value.trim().length > 0).refine((value) => Buffer.byteLength(value, "utf8") <= 10 * 1024 * 1024),
 }).strict();
 const artStyleSchema = z.object({ artStyle: z.string().max(1000).transform((value) => value.trim()) }).strict();
+const characterOutputSchema = z.array(z.object({
+  name: z.string().trim().min(1).max(120), age: z.number().int().min(0).max(150),
+  description: z.string().trim().min(1).max(2000), visualPrompt: z.string().trim().min(1).max(4000),
+}));
 
 export function createApp({ store, gemini = new RestGeminiService() }: { store: JsonStore; gemini?: GeminiService }) {
   const app = express();
   const runningStyleProjects = new Set<string>();
+  const runningCharacterProjects = new Set<string>();
+  const runningPortraitProjects = new Set<string>();
   app.use(express.json({ limit: "11mb" }));
   app.use(cookieParser());
 
@@ -136,6 +142,7 @@ export function createApp({ store, gemini = new RestGeminiService() }: { store: 
     const project = await store.mutate((data) => {
       const ownedProject = data.projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
       if (!ownedProject) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+      if (ownedProject.characters?.length) throw new ApiError(409, "STYLE_LOCKED", "Art style cannot change after characters are generated.");
       if (parsed.data.artStyle) {
         ownedProject.artStyle = parsed.data.artStyle;
         ownedProject.styleState = "completed";
@@ -210,9 +217,112 @@ export function createApp({ store, gemini = new RestGeminiService() }: { store: 
     }
   }));
 
+  app.post("/api/projects/:projectId/characters/generate", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.projectId);
+    const existing = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    if (!existing) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    if (!existing.artStyle) throw new ApiError(409, "STYLE_REQUIRED", "Complete the Style stage first.");
+    if (existing.characters?.length) return res.json({ project: existing });
+    if (runningCharacterProjects.has(projectId)) throw new ApiError(409, "STEP_RUNNING", "Character generation is already running.");
+    if (!gemini.generateCharacters) throw new ApiError(503, "GEMINI_NOT_CONFIGURED", "Character generation is unavailable.");
+
+    runningCharacterProjects.add(projectId);
+    await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.characterState = "running"; delete project.characterError; });
+    try {
+      let current = (await store.read()).projects.find((item) => item.id === projectId)!;
+      if (!validGeminiFile(current)) {
+        const file = await gemini.uploadBook(current.title, await store.readBook(projectId));
+        current = await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; saveGeminiFile(project, file); return project; });
+      }
+      const parsed = characterOutputSchema.safeParse(await gemini.generateCharacters(current.geminiFileUri!, current.artStyle!));
+      if (!parsed.success) throw new Error("Gemini returned invalid character data.");
+      const adults = parsed.data.filter((character) => character.age >= 18).slice(0, 2);
+      if (!adults.length) throw new Error("Gemini did not identify an adult main character.");
+      const completed = await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.characters = adults.map((character) => ({ id: randomUUID(), ...character }));
+        project.characterState = "completed";
+        project.portraitState = "idle";
+        project.status = "in_progress";
+        project.updatedAt = new Date().toISOString();
+        delete project.characterError;
+        return project;
+      });
+      res.json({ project: completed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gemini could not generate characters.";
+      await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.characterState = "failed"; project.characterError = message; project.status = "failed"; });
+      throw new ApiError(502, "GEMINI_ERROR", message);
+    } finally { runningCharacterProjects.delete(projectId); }
+  }));
+
+  app.post("/api/projects/:projectId/portraits/generate", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.projectId);
+    const existing = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    if (!existing) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    if (!existing.artStyle || !existing.characters?.length) throw new ApiError(409, "CHARACTERS_REQUIRED", "Complete the Characters stage first.");
+    if (existing.characters.every((character) => character.portraitFile)) return res.json({ project: existing });
+    if (runningPortraitProjects.has(projectId)) throw new ApiError(409, "STEP_RUNNING", "Portrait generation is already running.");
+    if (!gemini.generatePortrait) throw new ApiError(503, "GEMINI_NOT_CONFIGURED", "Portrait generation is unavailable.");
+
+    runningPortraitProjects.add(projectId);
+    await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.portraitState = "running"; delete project.portraitError; });
+    try {
+      let current = (await store.read()).projects.find((item) => item.id === projectId)!;
+      for (const character of current.characters!) {
+        if (character.portraitFile) continue;
+        const recoveredFile = await store.findPortrait(projectId, character.id);
+        if (recoveredFile) {
+          current = await store.mutate((data) => {
+            const project = data.projects.find((item) => item.id === projectId)!;
+            project.characters!.find((item) => item.id === character.id)!.portraitFile = recoveredFile;
+            return project;
+          });
+          continue;
+        }
+        const image = await gemini.generatePortrait(`Create one 3:4 character portrait with no text. Art style: ${current.artStyle}. Character: ${character.visualPrompt}. The character is an adult age ${character.age}. Neutral simple background, consistent storybook concept art.`);
+        const portraitFile = await store.savePortrait(projectId, character.id, image.data, image.mimeType);
+        current = await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          project.characters!.find((item) => item.id === character.id)!.portraitFile = portraitFile;
+          return project;
+        });
+      }
+      const completed = await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.portraitState = "completed"; project.status = "in_progress"; project.updatedAt = new Date().toISOString(); delete project.portraitError; return project; });
+      res.json({ project: completed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gemini could not generate portraits.";
+      await store.mutate((data) => { const project = data.projects.find((item) => item.id === projectId)!; project.portraitState = "failed"; project.portraitError = message; project.status = "failed"; });
+      throw new ApiError(502, "GEMINI_ERROR", message);
+    } finally { runningPortraitProjects.delete(projectId); }
+  }));
+
+  app.get("/api/projects/:projectId/portraits/:characterId", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = singleParam(req.params.projectId);
+    const characterId = singleParam(req.params.characterId);
+    const project = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    const character = project?.characters?.find((item) => item.id === characterId && item.portraitFile);
+    if (!character?.portraitFile) throw new ApiError(404, "PORTRAIT_NOT_FOUND", "Portrait not found.");
+    res.type(character.portraitFile).send(await store.readPortrait(projectId, character.portraitFile));
+  }));
+
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ApiError) return res.status(error.status).json({ code: error.code, message: error.message });
     res.status(500).json({ code: "INTERNAL_ERROR", message: "The server could not complete the request." });
   });
   return app;
+}
+
+function singleParam(value: string | string[] | undefined) {
+  const result = Array.isArray(value) ? value[0] : value;
+  if (!result) throw new ApiError(400, "VALIDATION_ERROR", "A required ID is missing.");
+  return result;
+}
+
+function validGeminiFile(project: ProjectRecord) {
+  return Boolean(project.geminiFileUri && (!project.geminiFileExpiresAt || Date.parse(project.geminiFileExpiresAt) > Date.now()));
+}
+
+function saveGeminiFile(project: ProjectRecord, file: { name: string; uri: string; expirationTime?: string }) {
+  project.geminiFileName = file.name; project.geminiFileUri = file.uri; project.geminiFileExpiresAt = file.expirationTime;
 }

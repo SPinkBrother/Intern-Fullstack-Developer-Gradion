@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
@@ -147,6 +147,55 @@ describe("Gradion API", () => {
     finishUpload({ name: "files/book-1", uri: "https://files/book-1" });
     await firstPromise;
     expect(gemini.generateStyle).toHaveBeenCalledTimes(1);
+  });
+
+  it("generates at most two adult characters and their portraits sequentially", async () => {
+    const gemini: GeminiService = {
+      uploadBook: vi.fn().mockResolvedValue({ name: "files/book-1", uri: "https://files/book-1" }),
+      generateStyle: vi.fn(),
+      generateCharacters: vi.fn().mockResolvedValue([
+        { name: "Child", age: 12, description: "A child", visualPrompt: "young child" },
+        { name: "Mira", age: 34, description: "The protagonist", visualPrompt: "adult woman with dark curls" },
+        { name: "Jon", age: 41, description: "Her companion", visualPrompt: "adult man with silver glasses" },
+      ]),
+      generatePortrait: vi.fn().mockResolvedValue({ data: new Uint8Array([137, 80, 78, 71]), mimeType: "image/png" }),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await agent.patch(`/api/projects/${projectId}/style`).send({ artStyle: "Watercolor" }).expect(200);
+
+    const characters = await agent.post(`/api/projects/${projectId}/characters/generate`).expect(200);
+    expect(characters.body.project.characters).toHaveLength(2);
+    expect(characters.body.project.characters.map((item: { name: string }) => item.name)).toEqual(["Mira", "Jon"]);
+
+    const portraits = await agent.post(`/api/projects/${projectId}/portraits/generate`).expect(200);
+    expect(portraits.body.project.portraitState).toBe("completed");
+    expect(gemini.generatePortrait).toHaveBeenCalledTimes(2);
+    await agent.get(`/api/projects/${projectId}/portraits/${portraits.body.project.characters[0].id}`).expect(200).expect("Content-Type", /png/);
+  });
+
+  it("links an existing portrait file during recovery without calling Gemini again", async () => {
+    const gemini: GeminiService = {
+      uploadBook: vi.fn(), generateStyle: vi.fn(), generatePortrait: vi.fn(),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const projectId = created.body.project.id;
+    await store.mutate((data) => {
+      const project = data.projects.find((item) => item.id === projectId)!;
+      project.artStyle = "Watercolor";
+      project.characters = [{ id: "c1", name: "Mira", age: 34, description: "Hero", visualPrompt: "dark curls" }];
+    });
+    await mkdir(join(store.portraitsRoot, projectId), { recursive: true });
+    await writeFile(join(store.portraitsRoot, projectId, "c1.jpg"), new Uint8Array([255, 216, 255]));
+
+    const response = await agent.post(`/api/projects/${projectId}/portraits/generate`).expect(200);
+    expect(response.body.project.characters[0].portraitFile).toBe("c1.jpg");
+    expect(gemini.generatePortrait).not.toHaveBeenCalled();
+    await agent.get(`/api/projects/${projectId}/portraits/c1`).expect(200).expect("Content-Type", /jpeg/);
   });
 
   it("validates project creation and authentication", async () => {

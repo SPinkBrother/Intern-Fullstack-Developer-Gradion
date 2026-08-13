@@ -29,6 +29,20 @@ export interface ProjectRecord {
   geminiFileName?: string;
   geminiFileUri?: string;
   geminiFileExpiresAt?: string;
+  characterState?: "idle" | "running" | "failed" | "completed";
+  characterError?: string;
+  portraitState?: "idle" | "running" | "failed" | "completed";
+  portraitError?: string;
+  characters?: CharacterRecord[];
+}
+
+export interface CharacterRecord {
+  id: string;
+  name: string;
+  age: number;
+  description: string;
+  visualPrompt: string;
+  portraitFile?: string;
 }
 
 export interface StoreData {
