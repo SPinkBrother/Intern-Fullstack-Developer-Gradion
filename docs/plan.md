@@ -23,6 +23,11 @@
   - Owner-only project endpoint for saving or clearing a manual style description.
   - Blank style is explicitly reserved for deriving the style from the book during later Gemini integration.
   - Five-stage progress bar mirrors `app-demo.html`; saving a style immediately marks Style complete and shows Characters as next.
+- [x] Gemini style setup
+  - Backend-only Gemini REST client configured through `GEMINI_API_KEY` and `GEMINI_TEXT_MODEL`.
+  - Blank manual style can upload the local book once and generate a persisted visual style.
+  - Saved Gemini file references are reusable by later steps while valid.
+  - Persisted style execution state plus a per-project in-memory guard blocks duplicate active requests; GET and polling remain read-only.
 
 Gemini integration and the five-step illustration pipeline are intentionally not implemented yet.
 
@@ -33,7 +38,7 @@ After the authentication checkpoint is approved, plan and implement one reviewab
 1. [x] Project list and empty state.
 2. [x] New project with paste/upload and local storage.
 3. [ ] Persistent pipeline state and concurrency guard.
-4. [ ] Gemini text steps: style and adult characters.
+4. [ ] Gemini text steps: style complete; adult characters remaining.
 5. [ ] Portrait generation and per-item progress.
 6. [ ] Chapter prompt and consistent final illustration.
 7. [ ] Failure recovery, final documentation, and complete verification.

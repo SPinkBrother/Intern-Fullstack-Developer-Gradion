@@ -21,3 +21,11 @@ The project detail view reads book text through an authenticated, owner-scoped A
 
 Art style is optional project metadata. A non-empty value is treated as the user's chosen direction; clearing it leaves the project ready for the future Gemini style step to derive a style from the stored book text. Saving a style does not introduce or advance pipeline state yet.
 
+## Gemini style integration
+
+Gemini is called only from Express through REST, keeping the API key out of the browser and avoiding another SDK dependency. When no manual style exists, the backend uploads the local `.txt` file through Gemini Files, persists its reusable file reference, and generates the style from that reference. Gemini files expire, so a later user-triggered step may upload the local source again only when the saved reference is no longer valid.
+
+The Style call uses a small per-project in-memory guard and persisted `styleState`. The guard prevents duplicate concurrent calls in one server process, while persisted state lets refresh and polling display progress without triggering work. This is intentionally smaller than the full pipeline state machine planned for later.
+
+The text model default is `gemini-3.5-flash`. The existing `generateContent` REST endpoint remains appropriate for this one-shot Style operation and is supported by Gemini 3.5 Flash; a broader migration to the Interactions API can be considered when implementing the later multi-step pipeline.
+

@@ -2,9 +2,10 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { JsonStore } from "./store.js";
+import type { GeminiService } from "./gemini.js";
 
 describe("Gradion API", () => {
   let root: string;
@@ -97,6 +98,55 @@ describe("Gradion API", () => {
     await other.patch(`/api/projects/${projectId}/style`).send({ artStyle: "Oil paint" }).expect(404);
     const cleared = await owner.patch(`/api/projects/${projectId}/style`).send({ artStyle: "   " }).expect(200);
     expect(cleared.body.project).not.toHaveProperty("artStyle");
+  });
+
+  it("uploads the book once and generates a style with Gemini", async () => {
+    const gemini: GeminiService = {
+      uploadBook: vi.fn().mockResolvedValue({ name: "files/book-1", uri: "https://files/book-1", expirationTime: "2026-08-15T00:00:00.000Z" }),
+      generateStyle: vi.fn().mockResolvedValue("Warm storybook watercolor"),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "A cat crossed the moonlit garden." }).expect(201);
+
+    const generated = await agent.post(`/api/projects/${created.body.project.id}/style/generate`).expect(200);
+    expect(generated.body.project).toMatchObject({ artStyle: "Warm storybook watercolor", styleState: "completed", geminiFileName: "files/book-1" });
+    expect(gemini.uploadBook).toHaveBeenCalledTimes(1);
+    expect(gemini.generateStyle).toHaveBeenCalledWith("https://files/book-1");
+  });
+
+  it("does not call Gemini when a manual style exists", async () => {
+    const gemini: GeminiService = { uploadBook: vi.fn(), generateStyle: vi.fn() };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    await agent.patch(`/api/projects/${created.body.project.id}/style`).send({ artStyle: "Ink drawing" }).expect(200);
+
+    await agent.post(`/api/projects/${created.body.project.id}/style/generate`).expect(200);
+    expect(gemini.uploadBook).not.toHaveBeenCalled();
+    expect(gemini.generateStyle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a duplicate style request while Gemini is running", async () => {
+    let finishUpload!: (value: { name: string; uri: string }) => void;
+    const upload = new Promise<{ name: string; uri: string }>((resolve) => { finishUpload = resolve; });
+    const gemini: GeminiService = {
+      uploadBook: vi.fn().mockReturnValue(upload),
+      generateStyle: vi.fn().mockResolvedValue("Watercolor"),
+    };
+    const agent = request.agent(createApp({ store, gemini }));
+    await agent.post("/api/auth/register").send({ name: "Lina", email: "lina@example.com", password: "x" }).expect(201);
+    const created = await agent.post("/api/projects").send({ title: "The Cat", bookContent: "Book text" }).expect(201);
+    const path = `/api/projects/${created.body.project.id}/style/generate`;
+
+    const first = agent.post(path).expect(200);
+    const firstPromise = first.then((response) => response);
+    await vi.waitFor(() => expect(gemini.uploadBook).toHaveBeenCalledTimes(1));
+    const duplicate = await agent.post(path).expect(409);
+    expect(duplicate.body.code).toBe("STEP_RUNNING");
+    finishUpload({ name: "files/book-1", uri: "https://files/book-1" });
+    await firstPromise;
+    expect(gemini.generateStyle).toHaveBeenCalledTimes(1);
   });
 
   it("validates project creation and authentication", async () => {

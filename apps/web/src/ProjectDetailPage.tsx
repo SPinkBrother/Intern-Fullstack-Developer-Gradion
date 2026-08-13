@@ -14,6 +14,7 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
   const [styleMessage, setStyleMessage] = useState("");
   const [styleError, setStyleError] = useState("");
   const [savedArtStyle, setSavedArtStyle] = useState("");
+  const [styleGenerating, setStyleGenerating] = useState(false);
 
   useEffect(() => {
     if (!project) return;
@@ -32,8 +33,25 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
     setArtStyle(project?.artStyle ?? "");
     setSavedArtStyle(project?.artStyle ?? "");
     setStyleMessage("");
-    setStyleError("");
+    setStyleError(project?.styleError ?? "");
+    setStyleGenerating(project?.styleState === "running");
   }, [project?.id, project?.artStyle]);
+
+  useEffect(() => {
+    if (!project || project.styleState !== "running") return;
+    const timer = setInterval(() => {
+      api.project(project.id).then(({ project: refreshed }) => {
+        if (refreshed.styleState === "running") return;
+        setStyleGenerating(false);
+        setSavedArtStyle(refreshed.artStyle ?? "");
+        setArtStyle(refreshed.artStyle ?? "");
+        setStyleError(refreshed.styleError ?? "");
+        if (refreshed.artStyle) setStyleMessage("Art style generated from the book.");
+        clearInterval(timer);
+      }).catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [project?.id, project?.styleState]);
 
   useEffect(() => {
     if (!bookOpen) return;
@@ -61,13 +79,30 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
     }
   }
 
+  async function generateArtStyle() {
+    if (!project || styleGenerating) return;
+    setStyleGenerating(true);
+    setStyleMessage("");
+    setStyleError("");
+    try {
+      const { project: generatedProject } = await api.generateArtStyle(project.id);
+      setSavedArtStyle(generatedProject.artStyle ?? "");
+      setArtStyle(generatedProject.artStyle ?? "");
+      setStyleMessage("Art style generated from the book.");
+    } catch (value) {
+      setStyleError((value as Error).message);
+    } finally {
+      setStyleGenerating(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-page px-4 py-10 sm:px-8 sm:py-14">
       <section className="mx-auto w-full max-w-4xl">
         <button className="mb-8 text-sm font-bold text-brand hover:text-brand-hover" onClick={onBack}>← Back to projects</button>
         {loading ? <div className="h-52 animate-pulse rounded-2xl bg-soft motion-reduce:animate-none" aria-label="Loading project" /> : error ? <div className="rounded-xl border border-danger/25 bg-danger/10 p-5 text-danger" role="alert">{error}</div> : project ? (
           <div className="rounded-2xl border border-line bg-surface p-7 shadow-card sm:p-10">
-            <span className="mb-3 inline-flex rounded-full bg-stone-200 px-3 py-1 text-xs font-bold text-muted">Draft</span>
+            <span className="mb-3 inline-flex rounded-full bg-stone-200 px-3 py-1 text-xs font-bold text-muted">{project.status === "draft" ? "Draft" : project.status === "failed" ? "Failed" : project.status === "completed" ? "Done" : "In progress"}</span>
             <h1 className="font-display text-4xl text-ink sm:text-5xl">{project.title}</h1>
             <p className="mt-2 text-sm text-muted">Created {formatDate(project.createdAt)} by {authorName}</p>
             <StageProgress styleComplete={Boolean(savedArtStyle)} />
@@ -80,7 +115,8 @@ export function ProjectDetailPage({ project, loading, error, authorName, onBack 
               <p className="mt-2 text-sm leading-6 text-muted" id="art-style-help">Optional. Leave this blank and the style will be based on the book text later.</p>
               <textarea className="mt-4 min-h-28 w-full resize-y rounded-lg border border-line bg-page px-4 py-3 text-ink outline-none placeholder:text-muted/70 focus:border-brand focus:ring-2 focus:ring-brand/20" id="art-style" aria-describedby="art-style-help" maxLength={1000} placeholder="Example: Warm hand-painted watercolor with soft ink outlines" value={artStyle} onChange={(event) => { setArtStyle(event.target.value); setStyleMessage(""); setStyleError(""); }} />
               <div className="mt-4 flex flex-wrap items-center gap-4">
-                <button className="rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={styleSaving}>{styleSaving ? "Saving…" : "Save art style"}</button>
+                <button className="rounded-lg bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={styleSaving || styleGenerating}>{styleSaving ? "Saving…" : "Save art style"}</button>
+                {!savedArtStyle && <button className="rounded-lg border border-brand px-5 py-3 text-sm font-bold text-brand hover:bg-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60" type="button" disabled={styleGenerating || styleSaving} onClick={() => void generateArtStyle()}>{styleGenerating ? "Generating from book…" : "Generate style from book"}</button>}
                 {styleMessage && <p className="text-sm font-bold text-success" role="status">{styleMessage}</p>}
                 {styleError && <p className="text-sm text-danger" role="alert">{styleError}</p>}
               </div>

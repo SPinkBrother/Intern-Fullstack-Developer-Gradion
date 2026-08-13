@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { z } from "zod";
 import { cookieOptions, hashPassword, newSessionToken, SESSION_COOKIE, sessionExpiry, tokenHash, verifyPassword } from "./auth.js";
 import { JsonStore } from "./store.js";
+import { RestGeminiService, type GeminiService } from "./gemini.js";
 import { publicUser, type ProjectRecord, type UserRecord } from "./types.js";
 
 declare global { namespace Express { interface Request { currentUser?: UserRecord; sessionHash?: string } } }
@@ -22,8 +23,9 @@ const createProjectSchema = z.object({
 }).strict();
 const artStyleSchema = z.object({ artStyle: z.string().max(1000).transform((value) => value.trim()) }).strict();
 
-export function createApp({ store }: { store: JsonStore }) {
+export function createApp({ store, gemini = new RestGeminiService() }: { store: JsonStore; gemini?: GeminiService }) {
   const app = express();
+  const runningStyleProjects = new Set<string>();
   app.use(express.json({ limit: "11mb" }));
   app.use(cookieParser());
 
@@ -104,6 +106,7 @@ export function createApp({ store }: { store: JsonStore }) {
       createdAt: now,
       updatedAt: now,
       status: "draft",
+      styleState: "idle",
     };
     await store.saveBook(id, parsed.data.bookContent);
     await store.mutate((data) => { data.projects.push(project); });
@@ -133,12 +136,78 @@ export function createApp({ store }: { store: JsonStore }) {
     const project = await store.mutate((data) => {
       const ownedProject = data.projects.find((item) => item.id === req.params.projectId && item.userId === req.currentUser!.id);
       if (!ownedProject) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
-      if (parsed.data.artStyle) ownedProject.artStyle = parsed.data.artStyle;
-      else delete ownedProject.artStyle;
+      if (parsed.data.artStyle) {
+        ownedProject.artStyle = parsed.data.artStyle;
+        ownedProject.styleState = "completed";
+        ownedProject.status = "in_progress";
+      } else {
+        delete ownedProject.artStyle;
+        ownedProject.styleState = "idle";
+        ownedProject.status = "draft";
+      }
+      delete ownedProject.styleError;
+      delete ownedProject.styleStartedAt;
       ownedProject.updatedAt = new Date().toISOString();
       return ownedProject;
     });
     res.json({ project });
+  }));
+
+  app.post("/api/projects/:projectId/style/generate", requireAuth, asyncRoute(async (req, res) => {
+    const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId;
+    if (!projectId) throw new ApiError(400, "VALIDATION_ERROR", "Project ID is required.");
+    const existing = (await store.read()).projects.find((item) => item.id === projectId && item.userId === req.currentUser!.id);
+    if (!existing) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found.");
+    if (existing.artStyle) return res.json({ project: existing });
+    if (runningStyleProjects.has(projectId)) throw new ApiError(409, "STEP_RUNNING", "Style generation is already running.");
+
+    runningStyleProjects.add(projectId);
+    await store.mutate((data) => {
+      const project = data.projects.find((item) => item.id === projectId)!;
+      project.styleState = "running";
+      project.status = "in_progress";
+      project.styleStartedAt = new Date().toISOString();
+      delete project.styleError;
+    });
+
+    try {
+      let current = (await store.read()).projects.find((item) => item.id === projectId)!;
+      const fileStillValid = current.geminiFileUri && (!current.geminiFileExpiresAt || Date.parse(current.geminiFileExpiresAt) > Date.now());
+      if (!fileStillValid) {
+        const file = await gemini.uploadBook(current.title, await store.readBook(projectId));
+        current = await store.mutate((data) => {
+          const project = data.projects.find((item) => item.id === projectId)!;
+          project.geminiFileName = file.name;
+          project.geminiFileUri = file.uri;
+          project.geminiFileExpiresAt = file.expirationTime;
+          return project;
+        });
+      }
+      const style = await gemini.generateStyle(current.geminiFileUri!);
+      const completed = await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.artStyle = style;
+        project.styleState = "completed";
+        project.status = "in_progress";
+        project.updatedAt = new Date().toISOString();
+        delete project.styleStartedAt;
+        delete project.styleError;
+        return project;
+      });
+      res.json({ project: completed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gemini could not generate the style.";
+      await store.mutate((data) => {
+        const project = data.projects.find((item) => item.id === projectId)!;
+        project.styleState = "failed";
+        project.status = "failed";
+        project.styleError = message;
+        delete project.styleStartedAt;
+      });
+      throw new ApiError(502, "GEMINI_ERROR", message);
+    } finally {
+      runningStyleProjects.delete(projectId);
+    }
   }));
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

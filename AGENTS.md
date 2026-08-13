@@ -66,7 +66,7 @@ The backend pipeline **must strictly follow** steps 1–5 of Google's notebook (
 - **Frontend**: React
 - **Storage**: JSON files with a file mutex lock
 - **Gemini API**: REST endpoints
-- **Gemini Text Model**: `gemini-2.5-flash` (or current equivalent)
+- **Gemini Text Model**: `gemini-3.5-flash` (or current equivalent)
 - **Gemini Image Model**: `imagen-3.0-generate-002` (or current equivalent)
 
 ---

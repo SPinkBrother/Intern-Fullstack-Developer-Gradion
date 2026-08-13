@@ -1,6 +1,6 @@
-# Gradion — Authentication Checkpoint
+# Gradion — Book Illustration Studio
 
-This repository currently contains authentication, the authenticated project list, and local project creation from pasted or uploaded text.
+This repository currently contains authentication, user-owned projects, local book ingestion and preview, and the first Gemini Style step.
 
 The React frontend uses Tailwind CSS with the brown pastel palette defined as reusable theme tokens in `apps/web/src/styles.css`.
 
@@ -21,6 +21,8 @@ npm.cmd install
 npm.cmd run dev
 ```
 
+Set `GEMINI_API_KEY` in `.env` before using **Generate style from book**. `GEMINI_TEXT_MODEL` defaults to `gemini-3.5-flash`. The key is read only by the backend and `.env` is ignored by Git.
+
 ## Authentication API
 
 - `POST /api/auth` — `{ "email", "password" }`
@@ -36,8 +38,11 @@ Passwords are salted and hashed with Node's built-in `scrypt`. Sessions use an H
 - `GET /api/projects` lists projects owned by the signed-in user.
 - `POST /api/projects` creates a draft project from `{ "title", "bookContent" }`.
 - `GET /api/projects/:projectId` loads an owned project.
+- `GET /api/projects/:projectId/book` reads the locally stored book for its owner.
+- `PATCH /api/projects/:projectId/style` saves or clears a manual style.
+- `POST /api/projects/:projectId/style/generate` derives a style with Gemini when no manual style exists.
 
-Project metadata remains in `data/store.json`. Book text is stored locally at `storage/books/{project_id}.txt` and is not sent to Gemini during project creation.
+Project metadata remains in `data/store.json`. Book text is stored locally at `storage/books/{project_id}.txt`; it is uploaded to Gemini only when the user explicitly requests style generation.
 
 ## Test
 
@@ -45,4 +50,4 @@ Project metadata remains in `data/store.json`. Book text is stored locally at `s
 ./test.sh
 ```
 
-Gemini and illustration pipeline features are not implemented yet.
+Characters, portraits, chapters, and final illustrations are not implemented yet.

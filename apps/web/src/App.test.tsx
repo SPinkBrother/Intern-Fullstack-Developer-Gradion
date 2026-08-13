@@ -113,6 +113,20 @@ describe("authentication pages", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/style", expect.objectContaining({ method: "PATCH" }));
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ artStyle: "Soft watercolor" });
   });
+
+  it("generates an art style from the saved book and advances the stage", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ bookContent: "A quiet story" }))
+      .mockResolvedValueOnce(json({ project: { id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "draft", artStyle: "Moonlit watercolor", styleState: "completed" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectDetailPage project={{ id: "p1", title: "The Cat", createdAt: "2026-08-12T00:00:00.000Z", status: "draft", styleState: "idle" }} loading={false} error="" authorName="Mira Hassan" onBack={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Generate style from book" }));
+    expect(await screen.findByText("Art style generated from the book.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Style complete")).toBeInTheDocument();
+    expect(screen.getByLabelText("Characters current step")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/p1/style/generate", expect.objectContaining({ method: "POST" }));
+  });
 });
 
 function json(body: unknown, status = 200) {

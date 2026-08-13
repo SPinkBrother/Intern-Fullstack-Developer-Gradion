@@ -30,7 +30,13 @@ function EmptyState({ onNewProject }: { onNewProject: () => void }) {
 }
 
 function ProjectRows({ projects }: { projects: Project[] }) {
-  return <section className="grid gap-3" aria-label="Projects">{projects.map((project, index) => <button className="group flex min-h-20 w-full items-center gap-4 rounded-xl border border-line/80 bg-surface p-5 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-accent" style={{ animationDelay: `${index * 45}ms` } as CSSProperties} key={project.id} onClick={() => { location.hash = `#/projects/${project.id}`; }}><span className="min-w-0 flex-1"><strong className="block truncate font-display text-lg text-ink">{project.title}</strong><small className="mt-1 block text-sm text-muted">Created {formatDate(project.createdAt)}</small></span><span className="rounded-full bg-stone-200 px-3 py-1 text-xs font-bold text-muted">Draft</span><span className="text-xl text-brand group-hover:translate-x-1">→</span></button>)}</section>;
+  return <section className="grid gap-3" aria-label="Projects">{projects.map((project, index) => <button className="group flex min-h-20 w-full items-center gap-4 rounded-xl border border-line/80 bg-surface p-5 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-accent" style={{ animationDelay: `${index * 45}ms` } as CSSProperties} key={project.id} onClick={() => { location.hash = `#/projects/${project.id}`; }}><span className="min-w-0 flex-1"><strong className="block truncate font-display text-lg text-ink">{project.title}</strong><small className="mt-1 block text-sm text-muted">Created {formatDate(project.createdAt)}</small></span><ProjectStatus status={project.status} /><span className="text-xl text-brand group-hover:translate-x-1">→</span></button>)}</section>;
+}
+
+function ProjectStatus({ status }: { status: Project["status"] }) {
+  const label = status === "draft" ? "Draft" : status === "completed" ? "Done" : status === "failed" ? "Failed" : "In progress";
+  const colors = status === "failed" ? "bg-danger/10 text-danger" : status === "completed" ? "bg-success/15 text-success" : status === "in_progress" ? "bg-soft text-brand" : "bg-stone-200 text-muted";
+  return <span className={`rounded-full px-3 py-1 text-xs font-bold ${colors}`}>{label}</span>;
 }
 
 function ProjectListSkeleton() { return <section className="grid gap-3" aria-label="Loading projects">{[0, 1, 2].map((item) => <div className="h-20 animate-pulse rounded-xl bg-soft" key={item} />)}</section>; }

@@ -21,8 +21,14 @@ export interface ProjectRecord {
   title: string;
   createdAt: string;
   updatedAt: string;
-  status: "draft";
+  status: "draft" | "in_progress" | "completed" | "failed";
   artStyle?: string;
+  styleState?: "idle" | "running" | "failed" | "completed";
+  styleError?: string;
+  styleStartedAt?: string;
+  geminiFileName?: string;
+  geminiFileUri?: string;
+  geminiFileExpiresAt?: string;
 }
 
 export interface StoreData {
